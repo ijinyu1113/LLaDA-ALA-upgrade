@@ -1,0 +1,424 @@
+Using python from: /sw/rh9.4/python/miniforge3/bin/python
+Python 3.12.11
+model                          -> LLaDAModel
+
+--- Second level under 'model' ---
+model.transformer                    -> ModuleDict
+
+--- Second level under 'model.transformer' ---
+model.transformer.wte                            -> Embedding
+model.transformer.emb_drop                       -> Dropout
+model.transformer.ln_f                           -> RMSLayerNorm
+model.transformer.blocks                         -> ModuleList
+model.transformer.ff_out                         -> Linear
+Base model type: <class 'transformers_modules.GSAI-ML.LLaDA-8B-Instruct.08b83a6feb34df1a6011b80c3c00c7563e963b07.modeling_llada.LLaDAModelLM'>
+Base output type: <class 'transformers.modeling_outputs.CausalLMOutputWithPast'>
+Has .logits: True
+Router output type: <class 'type'>
+Has .logits: True
+Base logits shape: torch.Size([1, 1, 126464])
+Router logits shape: torch.Size([1, 1, 126464])
+Manual vs direct max diff: 0.0
+    def forward(
+        self,
+        input_ids: torch.LongTensor,
+        input_embeddings: Optional[torch.FloatTensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        attention_bias: Optional[torch.Tensor] = None,
+        past_key_values: Optional[Sequence[Tuple[torch.Tensor, torch.Tensor]]] = None,
+        use_cache: bool = False,
+        last_logits_only: bool = False,
+        output_hidden_states: Optional[bool] = None,
+    ) -> LLaDAOutput:
+        """
+        :param input_ids: A tensor of shape `(batch_size, seq_len)`.
+        :param input_embeddings: A tensor of shape `(batch_size, seq_len, d_model)` with input
+            embeddings. When provided, it is treated as the output of the input embedding layer.
+        :param attention_mask: A tensor of shape `(batch_size, seq_len)` that indicates
+            which input IDs are masked. A `1` value in the mask means that
+            the corresponding input ID should *not* be ignored. A `0` means
+            that the corresponding input ID is masked.
+
+            This has the same meaning as the `attention_mask` in HuggingFace's `transformers`
+            library.
+        :param attention_bias: A tensor of shape `(batch_size, 1, seq_len, seq_len)`,
+            `(1, 1, seq_len, seq_len)`, or `(seq_len, seq_len)`. This is used
+            to introduce causal or other biases.
+
+            If the tensor is a bool or byte tensor, a `True` or `1` at `attention_bias[:, :, i, j]`
+            indicates that the i-th element in the sequence is allowed to attend to the j-th
+            element in the sequence.
+
+            If the tensor is a float tensor, it will just be added to the attention
+            scores before the softmax.
+
+            The default is causal, which corresponds to a lower-diagonal byte matrix of ones.
+        :param past_key_values: Pre-computed keys and values for each attention block.
+            Can be used to speed up sequential decoding. The `input_ids` which have
+            their past given to this model should not be passed as `input_ids` as they have already been computed.
+        :param use_cache: If `True`, return key and value tensors for each block.
+        :param last_logits_only: If `True`, only compute the logits for the last token of each sequence.
+            This can speed up decoding when you only care about the next token.
+        """
+        # Add Basic MDM Model config check
+        assert not self.config.alibi, "Alibi length extrapolation is not supported for MDM."
+        assert self.config.rope, "Rope must be used in Llama-Encoder for MDM."
+        assert (past_key_values is None and not use_cache), "The kvcache is not suppotred for MDM."
+
+        output_hidden_states = output_hidden_states if output_hidden_states is not None else False
+
+        if past_key_values:
+            assert len(past_key_values) == self.config.n_layers
+
+        batch_size, seq_len = input_ids.size() if input_embeddings is None else input_embeddings.size()[:2]
+        if past_key_values is None:
+            past_length = 0
+        else:
+            past_length = past_key_values[0][0].size(-2)
+
+        # Get embeddings of input.
+        # shape: (batch_size, seq_len, d_model)
+        x = self.transformer.wte(input_ids) if input_embeddings is None else input_embeddings  # type: ignore
+
+        if self.config.input_emb_norm:
+            x = x * (self.config.d_model**0.5)
+
+        if not (self.config.alibi or self.config.rope):
+            # Get positional embeddings.
+            # shape: (1, seq_len)
+            pos = torch.arange(past_length, past_length + seq_len, dtype=torch.long, device=x.device).unsqueeze(0)
+            # shape: (1, seq_len, d_model)
+            pos_emb = self.transformer.wpe(pos)  # type: ignore
+            x = pos_emb + x
+
+        # Add input + positional embeddings and apply dropout.
+        # shape: (batch_size, seq_len, d_model)
+        x = self.transformer.emb_drop(x)  # type: ignore
+
+        # Transform the attention mask into what the blocks expect.
+        if attention_mask is not None and 0.0 in attention_mask:
+            # shape: (batch_size, 1, 1, seq_len)
+            attention_mask = attention_mask.to(dtype=torch.float).view(batch_size, -1)[:, None, None, :]
+            attention_mask = (1.0 - attention_mask) * torch.finfo(attention_mask.dtype).min
+        else:
+            attention_mask = None
+
+        # Merge attention mask with attention bias.
+        if (
+            attention_bias is not None
+            or attention_mask is not None
+            or self.config.alibi
+            # NOTE (epwalsh): we need to initialize the attn bias in order for attn to work properly
+            # with key+value cache. Otherwise `F.scaled_dot_product_attention()` doesn't seem to compute
+            # scores correctly.
+            or past_key_values is not None
+        ):
+            if attention_bias is None and self.config.alibi:
+                attention_bias = get_causal_attention_bias(
+                    self.__cache, past_length + seq_len, x.device
+                ) + self.get_alibi_attention_bias(past_length + seq_len, x.device)
+            elif attention_bias is None:
+                attention_bias = self.get_bidirectional_attention_bias(past_length + seq_len, x.device)
+            elif attention_bias.dtype in (torch.int8, torch.bool):
+                attention_bias = attention_bias.to(dtype=torch.float)
+                attention_bias.masked_fill_(attention_bias == 0.0, torch.finfo(attention_bias.dtype).min)
+
+            # Transform to the right shape and data type.
+            mask_len = seq_len
+            if attention_mask is not None:
+                mask_len = attention_mask.shape[-1]
+            elif past_key_values is not None:
+                mask_len = past_key_values[0][0].shape[-2] + seq_len
+            attention_bias = attention_bias[:, :, :mask_len, :mask_len].to(dtype=torch.float)
+
+            # Add in the masking bias.
+            if attention_mask is not None:
+                attention_bias = attention_bias + attention_mask
+                # Might get -infs after adding attention mask, since dtype.min + dtype.min = -inf.
+                # `F.scaled_dot_product_attention()` doesn't handle -inf like you'd expect, instead
+                # it can produce NaNs.
+                ensure_finite_(attention_bias, check_neg_inf=True, check_pos_inf=False)
+
+        attn_key_values: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = [] if use_cache else None
+
+        # decoder layers
+        all_hidden_states = []
+
+        # Apply blocks one-by-one.
+        if self.config.block_group_size == 1:
+            for block_idx, block in enumerate(self.transformer.blocks):
+                if output_hidden_states:
+                    # add hidden states
+                    all_hidden_states.append(x)
+
+                layer_past = None if past_key_values is None else past_key_values[block_idx]
+                if (
+                    (self.activation_checkpointing_strategy == ActivationCheckpointingStrategy.whole_layer)
+                    or (
+                        self.activation_checkpointing_strategy == ActivationCheckpointingStrategy.one_in_two
+                        and block_idx % 2 == 0
+                    )
+                    or (
+                        self.activation_checkpointing_strategy == ActivationCheckpointingStrategy.one_in_three
+                        and block_idx % 3 == 0
+                    )
+                    or (
+                        self.activation_checkpointing_strategy == ActivationCheckpointingStrategy.one_in_four
+                        and block_idx % 4 == 0
+                    )
+                ):
+                    # shape: (batch_size, seq_len, d_model)
+                    x, cache = self._activation_checkpoint_fn(
+                        block, x, attention_bias=attention_bias, layer_past=layer_past, use_cache=use_cache
+                    )
+                else:
+                    # shape: (batch_size, seq_len, d_model)
+                    x, cache = block(x, attention_bias=attention_bias, layer_past=layer_past, use_cache=use_cache)
+                if attn_key_values is not None:
+                    assert cache is not None
+                    attn_key_values.append(cache)
+        else:
+            for group_idx, block_group in enumerate(self.transformer.block_groups):
+                if output_hidden_states:
+                    # add hidden states
+                    all_hidden_states.append(x)
+
+                layers_past = (
+                    None
+                    if past_key_values is None
+                    else past_key_values[
+                        group_idx * self.config.block_group_size : (group_idx + 1) * self.config.block_group_size
+                    ]
+                )
+                x, cache = block_group(
+                    x, attention_bias=attention_bias, layers_past=layers_past, use_cache=use_cache
+                )
+                if attn_key_values is not None:
+                    assert cache is not None
+                    attn_key_values.extend(cache)
+
+        if last_logits_only:
+            # shape: (batch_size, 1, d_model)
+            x = x[:, -1, :].unsqueeze(1)
+
+        # Apply final layer norm.
+        # shape: (batch_size, seq_len or 1, d_model)
+        x = self.transformer.ln_f(x)  # type: ignore
+        if output_hidden_states:
+            # add final hidden state post-final-layernorm, following HuggingFace's convention
+            all_hidden_states.append(x)
+
+        # Get logits.
+        # shape: (batch_size, seq_len or 1, vocab_size)
+        if self.config.weight_tying:
+            logits = F.linear(x, self.transformer.wte.weight, None)  # type: ignore
+        else:
+            logits = self.transformer.ff_out(x)  # type: ignore
+        if self.config.scale_logits:
+            logits.mul_(1 / math.sqrt(self.config.d_model))
+
+        return LLaDAOutput(logits=logits, attn_key_values=attn_key_values, hidden_states=tuple(all_hidden_states) if output_hidden_states else None)  # type: ignore[arg-type]
+
+============================================================
+Router loaded from amip_router_best.pt
+
+============================================================
+EVAL 1: Single-Step Mask Prediction Accuracy (p_mask=0.15)
+============================================================
+  Baseline: 0.7251
+  Router:   0.7076
+  Δ Acc:    -0.0175
+
+============================================================
+EVAL 2: Logical Reasoning (temps=[0.0, 0.15, 0.3])
+============================================================
+
+  --- Temperature: 0.0 ---
+  Category        | Expected   | Baseline                       | Router                        
+  ------------------------------------------------------------------------------------------
+  Triple Swap     | banana     | ✗ cherry.                      | ✓ banana , bob has the cherry 
+  Distractor      | copper     | ✓ copper coin.                 | ✓ copper coin , , , , , , the 
+  Relational      | building   | ✓ building.                    | ✓ hill , amongst mountain , hi
+  State Swap      | ball       | ✓ ball.                        | ✗ , , , , , , the , , , , , , 
+  Score: Baseline 3/4 | Router 3/4
+
+  --- Temperature: 0.15 ---
+  Category        | Expected   | Baseline                       | Router                        
+  ------------------------------------------------------------------------------------------
+  Triple Swap     | banana     | ✗ cherry.                      | ✓ banana , bob has the cherry 
+  Distractor      | copper     | ✓ copper coin.                 | ✓ copper coin , , , , , , the 
+  Relational      | building   | ✓ building.                    | ✓ hill . among mountain , hill
+  State Swap      | ball       | ✓ ball.                        | ✗ , , , , , , the , , , , , , 
+  Score: Baseline 3/4 | Router 3/4
+
+  --- Temperature: 0.3 ---
+  Category        | Expected   | Baseline                       | Router                        
+  ------------------------------------------------------------------------------------------
+  Triple Swap     | banana     | ✗ cherry.                      | ✓ banana , bob has the cherry 
+  Distractor      | copper     | ✓ copper coin.                 | ✓ copper coin , , , , , , the 
+  Relational      | building   | ✓ building.                    | ✓ building . among mountain , 
+  State Swap      | ball       | ✓ ball.                        | ✗ , , , , , , the , , , , , , 
+  Score: Baseline 3/4 | Router 3/4
+
+============================================================
+EVAL 3: Generation Diversity (temps=[0.0, 0.15, 0.3], samples=5)
+============================================================
+
+  --- Temperature: 0.0 ---
+    [Baseline #1]: One day, a curious cat named Whiskers stumbled upon a magical portal in the libr...
+    [Baseline #2]: One day, a curious cat named Whiskers stumbled upon a magical portal in the libr...
+    [Baseline #3]: One day, a curious cat named Whiskers stumbled upon a magical portal in the libr...
+    [Baseline #4]: One day, a curious cat named Whiskers stumbled upon a magical portal in the libr...
+    [Baseline #5]: One day, a curious cat named Whiskers stumbled upon a magical portal in the libr...
+    [Baseline] Unique: 0.1615 | Jaccard: 1.0000
+    [Router #1]: Once upon a time ,there was a cat , , , , , , , , , , , , , , , , , , , , , , , ...
+    [Router #2]: Once upon a time ,there was a cat , , , , , , , , , , , , , , , , , , , , , , , ...
+    [Router #3]: Once upon a time ,there was a cat , , , , , , , , , , , , , , , , , , , , , , , ...
+    [Router #4]: Once upon a time ,there was a cat , , , , , , , , , , , , , , , , , , , , , , , ...
+    [Router #5]: Once upon a time ,there was a cat , , , , , , , , , , , , , , , , , , , , , , , ...
+    [Router] Unique: 0.0258 | Jaccard: 1.0000
+
+  --- Temperature: 0.15 ---
+    [Baseline #1]: Once upon a time, there was a cat named Whiskers who loved to explore the world....
+    [Baseline #2]: Once upon a time, there was a cat named Whiskers who loved to explore the world....
+    [Baseline #3]: Once upon a time, there was a cat named Whiskers who loved to explore the world....
+    [Baseline #4]: Once upon a time, there was a cat named Whiskers who loved to explore the world....
+    [Baseline #5]: Once upon a time, there was a cat named Whiskers who loved to explore the world....
+    [Baseline] Unique: 0.1793 | Jaccard: 1.0000
+    [Router #1]: Once upon a time ,there was a cat , , , , , , , , , , , , , , , , , , , , , , , ...
+    [Router #2]: Once upon a time ,there was a cat , , , , , , , , , , , , , , , , , , , , , , , ...
+    [Router #3]: Once upon a time ,there was a cat , , , , , , , , , , , , , , , , , , , , , , , ...
+    [Router #4]: Once upon a time ,there was a cat , , , , , , , , , , , , , , , , , , , , , , , ...
+    [Router #5]: Once upon a time ,there was a cat , , , , , , , , , , , , , , , , , , , , , , , ...
+    [Router] Unique: 0.0258 | Jaccard: 1.0000
+
+  --- Temperature: 0.3 ---
+    [Baseline #1]: Once upon a time, there was a cat named Whiskers who loved exploring the library...
+    [Baseline #2]: Once upon a time, there was a cat named Whiskers who loved exploring the library...
+    [Baseline #3]: Once upon a time, there was a cat named Whiskers who loved exploring the library...
+    [Baseline #4]: Once upon a time, there was a cat named Whiskers who loved exploring the library...
+    [Baseline #5]: Once upon a time, there was a cat named Whiskers who loved exploring the library...
+    [Baseline] Unique: 0.1769 | Jaccard: 1.0000
+    [Router #1]: Once upon a time ,there was a cat , , , , , , , , , , , , , , , , , , , , , , , ...
+    [Router #2]: Once upon a time ,there was a cat , , , , , , , , , , , , , , , , , , , , , , , ...
+    [Router #3]: Once upon a time ,there was a cat , , , , , , , , , , , , , , , , , , , , , , , ...
+    [Router #4]: Once upon a time ,there was a cat , , , , , , , , , , , , , , , , , , , , , , , ...
+    [Router #5]: Once upon a time ,there was a cat , , , , , , , , , , , , , , , , , , , , , , , ...
+    [Router] Unique: 0.0258 | Jaccard: 1.0000
+
+  Stories saved to generated_stories.txt
+
+============================================================
+EVAL 4: Entropy Across Denoising Steps
+============================================================
+  Sample 1/3
+  Sample 2/3
+  Sample 3/3
+  Mean Base Entropy:   4.7307
+  Mean Router Entropy: 4.4195
+  Entropy plot saved to entropy_curve.png
+
+============================================================
+EVAL 5: Distribution Flatness
+============================================================
+  [Baseline] Entropy: 0.0014 | Normalized: 0.0006
+    P(1) = 0.0000
+    P(2) = 0.0000
+    P(3) = 0.0000
+    P(4) = 0.0000
+    P(5) = 0.0000
+    P(6) = 0.0000
+    P(7) = 0.0000
+    P(8) = 0.0000
+    P(9) = 0.0000
+    P(10) = 0.0000
+  [Router] Entropy: 0.0018 | Normalized: 0.0008
+    P(1) = 0.0000
+    P(2) = 0.0000
+    P(3) = 0.0000
+    P(4) = 0.0000
+    P(5) = 0.0000
+    P(6) = 0.0000
+    P(7) = 0.0000
+    P(8) = 0.0000
+    P(9) = 0.0000
+    P(10) = 0.0000
+  Flatness plot saved to flatness.png
+
+============================================================
+EVAL 6: GSM8K End-to-End Accuracy (n=50)
+============================================================
+  [Baseline] Q1 ✓ | Gold: 18 | Pred: 18
+    Response: To determine how much money Janet makes every day at the farmers' market, we need to follow these steps:
+
+1. Calculate the total number of eggs laid b...
+  [Router] Q1 ✓ | Gold: 18 | Pred: 18
+    Response: 1 , Janet lays 16 eggs per day .
+2 , She eats 3 eggs for breakfast every morning , so she has 16 − 3 = 13 eggs left .
+3 , She bakes muffins with 4 egg...
+  [Baseline] Q2 ✗ | Gold: 3 | Pred: 3.
+    Response: To determine the total number of bolts required for the robe, we need to add the amount of blue fiber to the amount of white fiber.
+
+1. The robe takes...
+  [Router] Q2 ✓ | Gold: 3 | Pred: 3
+    Response: robe takes 2 bolts of blue fiber ,
+robe takes 2 bolts of blue fiber ,
+robe takes 2 bolts of blue fiber ,
+robe takes 2 bolts of blue fiber ,
+robe takes...
+  [Baseline] Q3 ✗ | Gold: 70000 | Pred: 000.
+  [Router] Q3 ✗ | Gold: 70000 | Pred: 000
+  [Baseline] Q4 ✓ | Gold: 540 | Pred: 540
+  [Router] Q4 ✓ | Gold: 540 | Pred: 540
+  [Baseline] Q5 ✓ | Gold: 20 | Pred: 20
+  [Router] Q5 ✓ | Gold: 20 | Pred: 20
+  Progress 10/50 | Baseline: 0.6000
+  Progress 10/50 | Router: 0.5000
+  Progress 20/50 | Baseline: 0.6000
+  Progress 20/50 | Router: 0.4500
+  Progress 30/50 | Baseline: 0.5667
+  Progress 30/50 | Router: 0.4000
+  Progress 40/50 | Baseline: 0.5750
+  Progress 40/50 | Router: 0.4500
+  Progress 50/50 | Baseline: 0.6000
+  Progress 50/50 | Router: 0.4600
+
+  Baseline GSM8K Accuracy: 0.6000 (30/50)
+
+  Router GSM8K Accuracy: 0.4600 (23/50)
+  Sweep summary plot saved to sweep_summary.png
+
+================================================================================
+COMPLETE EVALUATION SUMMARY
+================================================================================
+
+  1. Mask Prediction Accuracy (single-step, p=0.15)
+     Baseline: 0.7251  |  Router: 0.7076  |  Δ: -0.0175
+
+  2. Logical Reasoning Accuracy
+     Temp     | Baseline   | Router     | Δ         
+     ------------------------------------------
+     0.0      | 0.7500     | 0.7500     | +0.0000   
+     0.15     | 0.7500     | 0.7500     | +0.0000   
+     0.3      | 0.7500     | 0.7500     | +0.0000   
+
+  3. Diversity (Jaccard Similarity — lower is more diverse)
+     Temp     | Base Jaccard   | Router Jaccard   | Base Unique    | Router Unique 
+     ----------------------------------------------------------------------
+     0.0      | 1.0000         | 1.0000           | 0.1615         | 0.0258        
+     0.15     | 1.0000         | 1.0000           | 0.1793         | 0.0258        
+     0.3      | 1.0000         | 1.0000           | 0.1769         | 0.0258        
+
+  4. Entropy Across Denoising Steps
+     Mean Base: 4.7307  |  Mean Router: 4.4195  |  Δ: -0.3111
+
+  5. Distribution Flatness (normalized entropy, 1.0 = uniform)
+     Baseline: 0.0006  |  Router: 0.0008
+
+  6. GSM8K End-to-End Accuracy
+     Baseline: 0.6000 (30/50)
+     Router:   0.4600 (23/50)
+
+================================================================================
+Results saved to eval_results.json
+Plots saved: entropy_curve.png, flatness.png, sweep_summary.png

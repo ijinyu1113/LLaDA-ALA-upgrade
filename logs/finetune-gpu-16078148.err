@@ -1,0 +1,28 @@
+A conda environment has been detected CONDA_PREFIX= /sw/rh9.4/python/miniforge3 
+miniconda3 is loaded. Consider running conda deactivate and reloading it.
+/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/transformers/utils/generic.py:441: FutureWarning: `torch.utils._pytree._register_pytree_node` is deprecated. Please use `torch.utils._pytree.register_pytree_node` instead.
+  _torch_pytree._register_pytree_node(
+/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/huggingface_hub/file_download.py:943: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+  warnings.warn(
+Special tokens have been added in the vocabulary, make sure the associated word embeddings are fine-tuned or trained.
+/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/transformers/utils/generic.py:309: FutureWarning: `torch.utils._pytree._register_pytree_node` is deprecated. Please use `torch.utils._pytree.register_pytree_node` instead.
+  _torch_pytree._register_pytree_node(
+/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/transformers/utils/generic.py:309: FutureWarning: `torch.utils._pytree._register_pytree_node` is deprecated. Please use `torch.utils._pytree.register_pytree_node` instead.
+  _torch_pytree._register_pytree_node(
+The model weights are not tied. Please use the `tie_weights` method before using the `infer_auto_device` function.
+Loading checkpoint shards:   0%|          | 0/6 [00:00<?, ?it/s]Loading checkpoint shards:  17%|█▋        | 1/6 [00:03<00:15,  3.00s/it]Loading checkpoint shards:  33%|███▎      | 2/6 [00:06<00:14,  3.56s/it]Loading checkpoint shards:  50%|█████     | 3/6 [00:11<00:11,  3.94s/it]Loading checkpoint shards:  67%|██████▋   | 4/6 [00:15<00:08,  4.04s/it]Loading checkpoint shards:  83%|████████▎ | 5/6 [00:19<00:04,  4.06s/it]Loading checkpoint shards: 100%|██████████| 6/6 [00:22<00:00,  3.64s/it]Loading checkpoint shards: 100%|██████████| 6/6 [00:22<00:00,  3.74s/it]
+/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/huggingface_hub/file_download.py:943: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+  warnings.warn(
+  0%|          | 0/1021 [00:00<?, ?it/s]  0%|          | 1/1021 [00:03<54:24,  3.20s/it]  0%|          | 1/1021 [00:05<1:37:01,  5.71s/it]
+Traceback (most recent call last):
+  File "/u/iyu1/nim_game_project/access_files/llada/train_router.py", line 187, in <module>
+    train()
+  File "/u/iyu1/nim_game_project/access_files/llada/train_router.py", line 171, in train
+    loss.backward()
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_tensor.py", line 647, in backward
+    torch.autograd.backward(
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/autograd/__init__.py", line 354, in backward
+    _engine_run_backward(
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/autograd/graph.py", line 829, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 1.83 GiB. GPU 0 has a total capacity of 39.49 GiB of which 1.61 GiB is free. Including non-PyTorch memory, this process has 37.88 GiB memory in use. Of the allocated memory 36.84 GiB is allocated by PyTorch, and 543.94 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)

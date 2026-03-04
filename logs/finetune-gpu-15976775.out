@@ -1,0 +1,213 @@
+Using python from: /sw/rh9.4/python/miniforge3/bin/python
+Python 3.12.11
+model                          -> LLaDAModel
+
+--- Second level under 'model' ---
+model.transformer                    -> ModuleDict
+
+--- Second level under 'model.transformer' ---
+model.transformer.wte                            -> Embedding
+model.transformer.emb_drop                       -> Dropout
+model.transformer.ln_f                           -> RMSLayerNorm
+model.transformer.blocks                         -> ModuleList
+model.transformer.ff_out                         -> Linear
+WARNING: Using random router weights.
+
+============================================================
+EVAL 1: Single-Step Mask Prediction Accuracy (p_mask=0.15)
+============================================================
+  Baseline: 0.7143
+  Router:   0.7143
+  Δ Acc:    +0.0000
+
+============================================================
+EVAL 2: Logical Reasoning (temps=[0.0, 0.15, 0.3])
+============================================================
+
+  --- Temperature: 0.0 ---
+  Category        | Expected   | Baseline                       | Router                        
+  ------------------------------------------------------------------------------------------
+  Triple Swap     | banana     | ✓ cherry, bob has the apple, a | ✓ cherry, bob has the apple, a
+  Distractor      | copper     | ✗ silver, and the blue bag has | ✗ silver, and the blue bag has
+  Relational      | building   | ✓ house. list the following in | ✓ house. list the following in
+  State Swap      | ball       | ✓ key, and the box has the bal | ✓ key, and the box has the bal
+  Score: Baseline 3/4 | Router 3/4
+
+  --- Temperature: 0.15 ---
+  Category        | Expected   | Baseline                       | Router                        
+  ------------------------------------------------------------------------------------------
+  Triple Swap     | banana     | ✓ cherry, bob has the apple, a | ✓ cherry, bob has the apple, a
+  Distractor      | copper     | ✗ silver, and the blue bag has | ✗ silver, and the blue bag has
+  Relational      | building   | ✓ house. list the following in | ✓ house. list the following in
+  State Swap      | ball       | ✓ key, and the box has the bal | ✓ key, and the box has the bal
+  Score: Baseline 3/4 | Router 3/4
+
+  --- Temperature: 0.3 ---
+  Category        | Expected   | Baseline                       | Router                        
+  ------------------------------------------------------------------------------------------
+  Triple Swap     | banana     | ✓ cherry, bob has the apple, a | ✓ cherry, bob has the apple, a
+  Distractor      | copper     | ✗ silver, and the blue bag has | ✗ silver, and the blue bag has
+  Relational      | building   | ✓ house. list the following in | ✓ house. list the following in
+  State Swap      | ball       | ✓ key, and the box has the bal | ✓ key, and the box has the bal
+  Score: Baseline 3/4 | Router 3/4
+
+============================================================
+EVAL 3: Generation Diversity (temps=[0.0, 0.15, 0.3], samples=5)
+============================================================
+
+  --- Temperature: 0.0 ---
+    [Baseline #1]: One day, a cat named Whiskers wandered into a library and found a large, old boo...
+    [Baseline #2]: One day, a cat named Whiskers wandered into a library and found a large, old boo...
+    [Baseline #3]: One day, a cat named Whiskers wandered into a library and found a large, old boo...
+    [Baseline #4]: One day, a cat named Whiskers wandered into a library and found a large, old boo...
+    [Baseline #5]: One day, a cat named Whiskers wandered into a library and found a large, old boo...
+    [Baseline] Unique: 0.1480 | Jaccard: 1.0000
+    [Router #1]: One day, a curious cat named Wiskers stumbled upon a mysterious book in the libr...
+    [Router #2]: One day, a curious cat named Wiskers stumbled upon a mysterious book in the libr...
+    [Router #3]: One day, a curious cat named Wiskers stumbled upon a mysterious book in the libr...
+    [Router #4]: One day, a curious cat named Wiskers stumbled upon a mysterious book in the libr...
+    [Router #5]: One day, a curious cat named Wiskers stumbled upon a mysterious book in the libr...
+    [Router] Unique: 0.1489 | Jaccard: 1.0000
+
+  --- Temperature: 0.15 ---
+    [Baseline #1]: One day, a cat named Whiskers wandered into a library and found a large, old boo...
+    [Baseline #2]: One day, a cat named Whiskers wandered into a library and found a large, old boo...
+    [Baseline #3]: One day, a cat named Whiskers wandered into a library and found a large, old boo...
+    [Baseline #4]: One day, a cat named Whiskers wandered into a library and found a large, old boo...
+    [Baseline #5]: One day, a cat named Whiskers wandered into a library and found a large, old boo...
+    [Baseline] Unique: 0.1855 | Jaccard: 0.8198
+    [Router #1]: One day, a curious cat named Wiskers stumbled upon a mysterious book in the libr...
+    [Router #2]: One day, a curious cat named Wiskers stumbled upon a mysterious book in the libr...
+    [Router #3]: One day, a curious cat named Wiskers stumbled upon a mysterious book in the libr...
+    [Router #4]: One day, a curious cat named Wiskers stumbled upon a mysterious book in the libr...
+    [Router #5]: A cat was walking in the library, and then it found a magical portal. The cat wa...
+    [Router] Unique: 0.2305 | Jaccard: 0.5997
+
+  --- Temperature: 0.3 ---
+    [Baseline #1]: One day, a cat named Whiskers wandered into a library and found a large, old boo...
+    [Baseline #2]: One day, a cat named Whiskers found a magical portal in a library. Through the p...
+    [Baseline #3]: One day, a cat named Whiskers found a magical portal in the library. Through the...
+    [Baseline #4]: One day, a cat named Whiskers wandered into a library and found a large, old boo...
+    [Baseline #5]: One day, a cat named Whiskers found a magical portal in a library. Through the p...
+    [Baseline] Unique: 0.3125 | Jaccard: 0.4135
+    [Router #1]: One day, a cat named Whiskers found a magical portal in a library. Through the p...
+    [Router #2]: One day, a curious cat named Wiskers stumbled upon a mysterious book in the libr...
+    [Router #3]: One day, a curious cat named Wiskers stumbled upon a mysterious book in the libr...
+    [Router #4]: A cat was walking in the library, and it came across a large, old book. Inside t...
+    [Router #5]: One day, a curious cat named Wiskers stumbled upon a mysterious book in the libr...
+    [Router] Unique: 0.3469 | Jaccard: 0.3680
+
+============================================================
+EVAL 4: Entropy Across Denoising Steps
+============================================================
+  Sample 1/3
+  Sample 2/3
+  Sample 3/3
+  Mean Base Entropy:   3.4981
+  Mean Router Entropy: 3.5817
+  Entropy plot saved to entropy_curve.png
+
+============================================================
+EVAL 5: Distribution Flatness
+============================================================
+  [Baseline] Entropy: 0.0020 | Normalized: 0.0009
+    P(1) = 0.0000
+    P(2) = 0.0000
+    P(3) = 0.0000
+    P(4) = 0.0000
+    P(5) = 0.0000
+    P(6) = 0.0000
+    P(7) = 0.0000
+    P(8) = 0.0000
+    P(9) = 0.0000
+    P(10) = 0.0000
+  [Router] Entropy: 0.0021 | Normalized: 0.0009
+    P(1) = 0.0000
+    P(2) = 0.0000
+    P(3) = 0.0000
+    P(4) = 0.0000
+    P(5) = 0.0000
+    P(6) = 0.0000
+    P(7) = 0.0000
+    P(8) = 0.0000
+    P(9) = 0.0000
+    P(10) = 0.0000
+  Flatness plot saved to flatness.png
+
+============================================================
+EVAL 6: GSM8K End-to-End Accuracy (n=50)
+============================================================
+  [Baseline] Q1 ✗ | Gold: 18 | Pred: 183418
+    Response: 1. **Determine the total number of eggs laid per day:**
+   - Janet has 16 eggs per day.
+
+2. **Calculate the number of eggs used for breakfast and muff...
+  [Router] Q1 ✗ | Gold: 18 | Pred: 183418
+    Response: 1. **Determine the total number of eggs laid per day:**
+   - Janet has 16 eggs per day.
+
+2. **Calculate the number of eggs used for breakfast and muff...
+  [Baseline] Q2 ✓ | Gold: 3 | Pred: 3
+    Response: To find the total number of bolts needed for the robe, we need to add the amount of blue fiber and the amount of white fiber.
+
+1. The robe takes 2 bol...
+  [Router] Q2 ✗ | Gold: 3 | Pred: 3.
+    Response: To determine the total number of bolts required for the robe, we need to add the amounts of blue and white fiber together.
+
+1. The problem states that...
+  [Baseline] Q3 ✗ | Gold: 70000 | Pred: 000.
+  [Router] Q3 ✗ | Gold: 70000 | Pred: 000.
+  [Baseline] Q4 ✓ | Gold: 540 | Pred: 540
+  [Router] Q4 ✓ | Gold: 540 | Pred: 540
+  [Baseline] Q5 ✓ | Gold: 20 | Pred: 20
+  [Router] Q5 ✓ | Gold: 20 | Pred: 20
+  Progress 10/50 | Baseline: 0.5000
+  Progress 10/50 | Router: 0.5000
+  Progress 20/50 | Baseline: 0.4500
+  Progress 20/50 | Router: 0.4000
+  Progress 30/50 | Baseline: 0.4333
+  Progress 30/50 | Router: 0.4000
+  Progress 40/50 | Baseline: 0.4750
+  Progress 40/50 | Router: 0.4250
+  Progress 50/50 | Baseline: 0.5000
+  Progress 50/50 | Router: 0.4600
+
+  Baseline GSM8K Accuracy: 0.5000 (25/50)
+
+  Router GSM8K Accuracy: 0.4600 (23/50)
+  Sweep summary plot saved to sweep_summary.png
+
+================================================================================
+COMPLETE EVALUATION SUMMARY
+================================================================================
+
+  1. Mask Prediction Accuracy (single-step, p=0.15)
+     Baseline: 0.7143  |  Router: 0.7143  |  Δ: +0.0000
+
+  2. Logical Reasoning Accuracy
+     Temp     | Baseline   | Router     | Δ         
+     ------------------------------------------
+     0.0      | 0.7500     | 0.7500     | +0.0000   
+     0.15     | 0.7500     | 0.7500     | +0.0000   
+     0.3      | 0.7500     | 0.7500     | +0.0000   
+
+  3. Diversity (Jaccard Similarity — lower is more diverse)
+     Temp     | Base Jaccard   | Router Jaccard   | Base Unique    | Router Unique 
+     ----------------------------------------------------------------------
+     0.0      | 1.0000         | 1.0000           | 0.1480         | 0.1489        
+     0.15     | 0.8198         | 0.5997           | 0.1855         | 0.2305        
+     0.3      | 0.4135         | 0.3680           | 0.3125         | 0.3469        
+
+  4. Entropy Across Denoising Steps
+     Mean Base: 3.4981  |  Mean Router: 3.5817  |  Δ: +0.0836
+
+  5. Distribution Flatness (normalized entropy, 1.0 = uniform)
+     Baseline: 0.0009  |  Router: 0.0009
+
+  6. GSM8K End-to-End Accuracy
+     Baseline: 0.5000 (25/50)
+     Router:   0.4600 (23/50)
+
+================================================================================
+Results saved to eval_results.json
+Plots saved: entropy_curve.png, flatness.png, sweep_summary.png

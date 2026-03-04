@@ -1,0 +1,162 @@
+Running "module reset". Resetting modules to system default. The following $MODULEPATH directories have been removed: /opt/cray/pe/lmod/modulefiles/mpi/gnu/12.0/ofi/1.0/cray-mpich/8.0 /opt/cray/pe/lmod/modulefiles/mix_compilers /opt/cray/pe/lmod/modulefiles/compiler/gnu/12.0 /opt/cray/pe/lmod/modulefiles/perftools/25.09.0
+Lmod has detected the following error: The following module(s) are unknown:
+"libfabric/2.3.1"
+
+Please check the spelling or version number. Also try "module spider ..."
+It is also possible your cache file is out-of-date; it may help to try:
+  $ module --ignore_cache load "libfabric/2.3.1"
+
+Also make sure that all modulefiles written in TCL start with the string
+#%Module
+
+Executing this command requires loading "libfabric/2.3.1" which failed while
+processing the following module(s):
+
+    Module fullname                 Module Filename
+    ---------------                 ---------------
+    nccl-ofi-plugin/1.18.0-cuda129  /sw/user/modules/nccl-ofi-plugin/1.18.0-cuda129.lua
+    default-update                  /sw/user/modules/default-update.lua
+
+
+Traceback (most recent call last):
+  File "<string>", line 5, in <module>
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/cuda/__init__.py", line 584, in get_device_name
+    return get_device_properties(device).name
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/cuda/__init__.py", line 616, in get_device_properties
+    _lazy_init()  # will define _get_device_properties
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/cuda/__init__.py", line 403, in _lazy_init
+    raise AssertionError("Torch not compiled with CUDA enabled")
+AssertionError: Torch not compiled with CUDA enabled
+gpu-bind: usable_gres=0x1; bit_alloc=0x1; local_inx=1; global_list=0; local_list=0
+/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/transformers/utils/generic.py:441: FutureWarning: `torch.utils._pytree._register_pytree_node` is deprecated. Please use `torch.utils._pytree.register_pytree_node` instead.
+  _torch_pytree._register_pytree_node(
+/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/huggingface_hub/file_download.py:943: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+  warnings.warn(
+Special tokens have been added in the vocabulary, make sure the associated word embeddings are fine-tuned or trained.
+/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/transformers/utils/generic.py:309: FutureWarning: `torch.utils._pytree._register_pytree_node` is deprecated. Please use `torch.utils._pytree.register_pytree_node` instead.
+  _torch_pytree._register_pytree_node(
+/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/transformers/utils/generic.py:309: FutureWarning: `torch.utils._pytree._register_pytree_node` is deprecated. Please use `torch.utils._pytree.register_pytree_node` instead.
+  _torch_pytree._register_pytree_node(
+The model weights are not tied. Please use the `tie_weights` method before using the `infer_auto_device` function.
+Loading checkpoint shards:   0%|          | 0/6 [00:00<?, ?it/s]Loading checkpoint shards:  17%|█▋        | 1/6 [00:00<00:00,  6.06it/s]Loading checkpoint shards:  33%|███▎      | 2/6 [00:00<00:00,  7.43it/s]Loading checkpoint shards:  50%|█████     | 3/6 [00:00<00:00,  5.43it/s]Loading checkpoint shards:  67%|██████▋   | 4/6 [00:00<00:00,  4.06it/s]Loading checkpoint shards:  83%|████████▎ | 5/6 [00:01<00:00,  4.81it/s]Loading checkpoint shards: 100%|██████████| 6/6 [00:01<00:00,  5.66it/s]Loading checkpoint shards: 100%|██████████| 6/6 [00:01<00:00,  5.36it/s]
+/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/huggingface_hub/file_download.py:943: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+  warnings.warn(
+Generating test split:   0%|          | 0/4358 [00:00<?, ? examples/s]Generating test split: 100%|██████████| 4358/4358 [00:00<00:00, 68174.12 examples/s]
+Generating train split:   0%|          | 0/1801350 [00:00<?, ? examples/s]Generating train split:   8%|▊         | 137000/1801350 [00:00<00:01, 1093607.48 examples/s]Generating train split:  18%|█▊        | 332000/1801350 [00:00<00:01, 1247806.24 examples/s]Generating train split:  29%|██▉       | 524000/1801350 [00:00<00:01, 1129245.46 examples/s]Generating train split:  40%|███▉      | 717000/1801350 [00:00<00:01, 642813.79 examples/s] Generating train split:  50%|█████     | 901675/1801350 [00:01<00:02, 408318.92 examples/s]Generating train split:  61%|██████    | 1093675/1801350 [00:02<00:01, 392432.55 examples/s]Generating train split:  71%|███████▏  | 1285675/1801350 [00:02<00:01, 387845.24 examples/s]Generating train split:  82%|████████▏ | 1476675/1801350 [00:03<00:00, 359640.24 examples/s]Generating train split:  92%|█████████▏| 1649675/1801350 [00:03<00:00, 378052.66 examples/s]Generating train split: 100%|██████████| 1801350/1801350 [00:03<00:00, 474651.59 examples/s]
+Generating validation split:   0%|          | 0/3760 [00:00<?, ? examples/s]Generating validation split: 100%|██████████| 3760/3760 [00:00<00:00, 420268.70 examples/s]
+Filter:   0%|          | 0/1801350 [00:00<?, ? examples/s]Filter:   3%|▎         | 51000/1801350 [00:00<00:03, 500939.08 examples/s]Filter:   6%|▋         | 116000/1801350 [00:00<00:02, 582362.38 examples/s]Filter:  10%|█         | 182000/1801350 [00:00<00:02, 616251.86 examples/s]Filter:  14%|█▍        | 249000/1801350 [00:00<00:02, 632743.57 examples/s]Filter:  17%|█▋        | 314000/1801350 [00:00<00:02, 635018.35 examples/s]Filter:  21%|██        | 379000/1801350 [00:00<00:02, 636197.02 examples/s]Filter:  25%|██▍       | 445000/1801350 [00:00<00:02, 642406.63 examples/s]Filter:  28%|██▊       | 511000/1801350 [00:00<00:01, 646937.62 examples/s]Filter:  32%|███▏      | 577000/1801350 [00:00<00:01, 648515.18 examples/s]Filter:  36%|███▌      | 643000/1801350 [00:01<00:01, 650839.22 examples/s]Filter:  39%|███▉      | 709000/1801350 [00:01<00:01, 651885.68 examples/s]Filter:  43%|████▎     | 775000/1801350 [00:01<00:01, 653071.53 examples/s]Filter:  47%|████▋     | 841000/1801350 [00:01<00:01, 653285.29 examples/s]Filter:  50%|█████     | 907000/1801350 [00:01<00:01, 652014.90 examples/s]Filter:  54%|█████▍    | 973000/1801350 [00:01<00:01, 651326.35 examples/s]Filter:  58%|█████▊    | 1039000/1801350 [00:01<00:01, 651646.76 examples/s]Filter:  61%|██████▏   | 1105000/1801350 [00:01<00:01, 652016.55 examples/s]Filter:  65%|██████▌   | 1171000/1801350 [00:01<00:00, 651805.21 examples/s]Filter:  69%|██████▊   | 1237000/1801350 [00:01<00:00, 651124.38 examples/s]Filter:  72%|███████▏  | 1303000/1801350 [00:02<00:00, 652037.95 examples/s]Filter:  76%|███████▌  | 1369000/1801350 [00:02<00:00, 653366.18 examples/s]Filter:  80%|███████▉  | 1435000/1801350 [00:02<00:00, 653488.40 examples/s]Filter:  83%|████████▎ | 1501000/1801350 [00:02<00:00, 655100.06 examples/s]Filter:  87%|████████▋ | 1567000/1801350 [00:02<00:00, 655264.13 examples/s]Filter:  91%|█████████ | 1634000/1801350 [00:02<00:00, 656957.97 examples/s]Filter:  94%|█████████▍| 1701000/1801350 [00:02<00:00, 656218.42 examples/s]Filter:  98%|█████████▊| 1768000/1801350 [00:02<00:00, 656935.51 examples/s]Filter: 100%|██████████| 1801350/1801350 [00:02<00:00, 639109.89 examples/s]
+Filter:   0%|          | 0/3760 [00:00<?, ? examples/s]Filter: 100%|██████████| 3760/3760 [00:00<00:00, 271953.49 examples/s]
+/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/utils/data/dataloader.py:666: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+  warnings.warn(warn_msg)
+/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/amp/autocast_mode.py:266: UserWarning: User provided device_type of 'cuda', but CUDA is not available. Disabling
+  warnings.warn(
+C0303 17:30:12.904000 537277 site-packages/torch/_inductor/scheduler.py:1198] [0/0] Error in codegen for ComputedBuffer(name='buf1', layout=FixedLayout('cpu', torch.float32, size=[512, 1], stride=[1, 512]), data=Reduction(
+C0303 17:30:12.904000 537277 site-packages/torch/_inductor/scheduler.py:1198] [0/0]   'cpu',
+C0303 17:30:12.904000 537277 site-packages/torch/_inductor/scheduler.py:1198] [0/0]   torch.float32,
+C0303 17:30:12.904000 537277 site-packages/torch/_inductor/scheduler.py:1198] [0/0]   def inner_fn(index, rindex):
+C0303 17:30:12.904000 537277 site-packages/torch/_inductor/scheduler.py:1198] [0/0]       i0, _ = index
+C0303 17:30:12.904000 537277 site-packages/torch/_inductor/scheduler.py:1198] [0/0]       r0_0 = rindex
+C0303 17:30:12.904000 537277 site-packages/torch/_inductor/scheduler.py:1198] [0/0]       tmp0 = ops.load(buf0, r0_0 + 8 * i0)
+C0303 17:30:12.904000 537277 site-packages/torch/_inductor/scheduler.py:1198] [0/0]       tmp1 = ops.to_dtype(tmp0, torch.float32, src_dtype=torch.bfloat16)
+C0303 17:30:12.904000 537277 site-packages/torch/_inductor/scheduler.py:1198] [0/0]       return tmp1
+C0303 17:30:12.904000 537277 site-packages/torch/_inductor/scheduler.py:1198] [0/0]   ,
+C0303 17:30:12.904000 537277 site-packages/torch/_inductor/scheduler.py:1198] [0/0]   ranges=[512, 1],
+C0303 17:30:12.904000 537277 site-packages/torch/_inductor/scheduler.py:1198] [0/0]   reduction_ranges=[8],
+C0303 17:30:12.904000 537277 site-packages/torch/_inductor/scheduler.py:1198] [0/0]   reduction_type=max,
+C0303 17:30:12.904000 537277 site-packages/torch/_inductor/scheduler.py:1198] [0/0]   origin_node=amax,
+C0303 17:30:12.904000 537277 site-packages/torch/_inductor/scheduler.py:1198] [0/0]   origins=OrderedSet([amax, convert_element_type_3])
+C0303 17:30:12.904000 537277 site-packages/torch/_inductor/scheduler.py:1198] [0/0] ))
+Traceback (most recent call last):
+  File "/u/iyu1/nim_game_project/access_files/llada/train_router.py", line 406, in <module>
+    train()
+  File "/u/iyu1/nim_game_project/access_files/llada/train_router.py", line 336, in train
+    delta = router(h_anchor, h_mask)
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py", line 375, in __call__
+    return super().__call__(*args, **kwargs)
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py", line 749, in compile_wrapper
+    raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/compile_fx.py", line 923, in _compile_fx_inner
+    raise InductorError(e, currentframe()).with_traceback(
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/compile_fx.py", line 907, in _compile_fx_inner
+    mb_compiled_graph = fx_codegen_and_compile(
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/compile_fx.py", line 1578, in fx_codegen_and_compile
+    return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/compile_fx.py", line 1456, in codegen_and_compile
+    compiled_module = graph.compile_to_module()
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/graph.py", line 2293, in compile_to_module
+    return self._compile_to_module()
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/graph.py", line 2299, in _compile_to_module
+    self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/graph.py", line 2238, in codegen
+    self.scheduler.codegen()
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/scheduler.py", line 4598, in codegen
+    else self._codegen(self.nodes)
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/scheduler.py", line 4750, in _codegen
+    self.get_backend(device).codegen_node(node)
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/codegen/cpp.py", line 5072, in codegen_node
+    self.codegen_outer_loop_node(node)
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/codegen/cpp.py", line 5046, in codegen_outer_loop_node
+    if not try_outer_loop_fusion_with_local_buf(node):
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/codegen/cpp.py", line 5018, in try_outer_loop_fusion_with_local_buf
+    cpp_kernel_proxy.codegen_nodes(_node.get_nodes())  # type: ignore[arg-type]
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/codegen/cpp.py", line 4311, in codegen_nodes
+    self.codegen_functions(fn_list, var_sizes_list)
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/codegen/cpp.py", line 4126, in codegen_functions
+    scalar_kernel = codegen_kernel(self.kernel_cls)
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/codegen/cpp.py", line 4103, in codegen_kernel
+    run(kernel)
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/codegen/cpp.py", line 4115, in run
+    fn(vars, reduction_vars)
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/codegen/cpp_utils.py", line 403, in inner
+    return fn(*args, **kwargs)
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/codegen/cpp.py", line 4292, in fn
+    return node.codegen(index_vars)
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/scheduler.py", line 1196, in codegen
+    self._body(*index_vars)
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/loop_body.py", line 425, in __call__
+    result = self.root_block()
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/loop_body.py", line 494, in __call__
+    return InterpreterShim(graph, submodules).run(V.get_ops_handler())
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/loop_body.py", line 60, in run
+    return super().run(*args, **kwargs)
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/fx/interpreter.py", line 173, in run
+    self.env[node] = self.run_node(node)
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/loop_body.py", line 56, in run_node
+    return super().run_node(n)
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/fx/interpreter.py", line 242, in run_node
+    return getattr(self, n.op)(n.target, args, kwargs)
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/fx/interpreter.py", line 346, in call_method
+    return getattr(self_obj, target)(*args_tail, **kwargs)
+  File "<string>", line 317, in reduction
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/ops_handler.py", line 1007, in _default
+    return getattr(self._inner, name)(*args, **kwargs)
+  File "<string>", line 317, in reduction
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/ops_handler.py", line 1007, in _default
+    return getattr(self._inner, name)(*args, **kwargs)
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/codegen/common.py", line 2591, in reduction
+    return self.kernel.reduction(dtype, src_dtype, reduction_type, value)
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/codegen/cpp.py", line 2155, in reduction
+    self._gen_parallel_reduction_buffers(acc, acc_type, reduction_type, init_dtype)
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/codegen/cpp.py", line 1942, in _gen_parallel_reduction_buffers
+    reduction_prefix_array(
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/codegen/cpp.py", line 335, in reduction_prefix_array
+    if cpp_builder.is_msvc_cl()
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/cpp_builder.py", line 316, in is_msvc_cl
+    return _is_msvc_cl(get_cpp_compiler())
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/cpp_builder.py", line 155, in get_cpp_compiler
+    compiler = cpp_compiler_search(search)
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/torch/_inductor/cpp_builder.py", line 101, in cpp_compiler_search
+    raise exc.InvalidCxxCompiler
+torch._inductor.exc.InductorError: InvalidCxxCompiler: No working C++ compiler found in torch._inductor.config.cpp.cxx: (None, 'CC')
+
+Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"
+
+srun: error: gh147: task 0: Exited with exit code 1
+
+real	1m21.375s
+user	0m0.001s
+sys	0m0.016s

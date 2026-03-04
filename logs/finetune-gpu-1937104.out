@@ -1,0 +1,95 @@
+=========================================
+JOB 1937104 on gh077.hsn.cm.delta.internal.ncsa.edu
+NVIDIA GH200 120GB, 97871 MiB, 550.163.01
+PyTorch 2.5.1
+CUDA 12.4
+GPU: NVIDIA GH200 120GB
+BF16: True
+=========================================
+Loading dataset...
+Dataset loaded.
+Filtering train...
+Train filtered: 804413 examples
+Filtering val...
+Val filtered: 1743 examples
+Creating dataloaders...
+============================================================
+Training ALA Router (H100 optimized)
+  Dataset:    wikitext-103
+  Max steps:  10000
+  Batch size: 16 x 4 grad_accum = 64 effective
+  Alpha:      0.05 + 0.25 * p_mask
+  p_mask:     U[0.3, 1.0]
+  Compile:    max-autotune | Optimizer: fused AdamW | Precision: bf16
+============================================================
+First training step starting...
+  Step 200/10000 | Loss: 3.2774 | p_mask: 0.86 | alpha: 0.265 | Pairs: 2027 | Steps/s: 2.53 | ETA: 64.5min
+  Step 400/10000 | Loss: 3.1702 | p_mask: 0.54 | alpha: 0.186 | Pairs: 4347 | Steps/s: 2.55 | ETA: 62.9min
+  Step 600/10000 | Loss: 3.1999 | p_mask: 0.73 | alpha: 0.232 | Pairs: 2972 | Steps/s: 2.55 | ETA: 61.5min
+  Step 800/10000 | Loss: 3.1152 | p_mask: 0.95 | alpha: 0.286 | Pairs: 937 | Steps/s: 2.55 | ETA: 60.2min
+  Step 1000/10000 | Loss: 3.0902 | p_mask: 0.85 | alpha: 0.263 | Pairs: 2439 | Steps/s: 2.55 | ETA: 58.9min
+  >>> Validation Loss: 3.1147 (best: inf)
+  >>> New best model saved!
+  Step 1200/10000 | Loss: 3.1602 | p_mask: 0.88 | alpha: 0.269 | Pairs: 1883 | Steps/s: 2.52 | ETA: 58.2min
+  Step 1400/10000 | Loss: 3.1375 | p_mask: 0.67 | alpha: 0.218 | Pairs: 3934 | Steps/s: 2.53 | ETA: 56.7min
+  Step 1600/10000 | Loss: 3.1702 | p_mask: 0.35 | alpha: 0.137 | Pairs: 3922 | Steps/s: 2.53 | ETA: 55.4min
+  Step 1800/10000 | Loss: 3.0589 | p_mask: 0.55 | alpha: 0.187 | Pairs: 4466 | Steps/s: 2.53 | ETA: 54.0min
+  Step 2000/10000 | Loss: 3.1868 | p_mask: 0.40 | alpha: 0.149 | Pairs: 3911 | Steps/s: 2.53 | ETA: 52.6min
+  >>> Validation Loss: 3.1153 (best: 3.1147)
+  Step 2200/10000 | Loss: 3.0952 | p_mask: 0.61 | alpha: 0.202 | Pairs: 4473 | Steps/s: 2.52 | ETA: 51.5min
+  Step 2400/10000 | Loss: 3.1002 | p_mask: 0.92 | alpha: 0.281 | Pairs: 1310 | Steps/s: 2.52 | ETA: 50.2min
+  Step 2600/10000 | Loss: 3.1096 | p_mask: 0.74 | alpha: 0.236 | Pairs: 3327 | Steps/s: 2.53 | ETA: 48.8min
+  Step 2800/10000 | Loss: 3.1050 | p_mask: 0.61 | alpha: 0.202 | Pairs: 4031 | Steps/s: 2.53 | ETA: 47.5min
+  Step 3000/10000 | Loss: 3.1506 | p_mask: 0.86 | alpha: 0.264 | Pairs: 2283 | Steps/s: 2.53 | ETA: 46.1min
+  >>> Validation Loss: 3.0634 (best: 3.1147)
+  >>> New best model saved!
+  Step 3200/10000 | Loss: 3.2120 | p_mask: 0.83 | alpha: 0.257 | Pairs: 2224 | Steps/s: 2.52 | ETA: 44.9min
+  Step 3400/10000 | Loss: 3.1121 | p_mask: 0.32 | alpha: 0.129 | Pairs: 3556 | Steps/s: 2.52 | ETA: 43.6min
+  Step 3600/10000 | Loss: 3.0821 | p_mask: 0.74 | alpha: 0.236 | Pairs: 3235 | Steps/s: 2.53 | ETA: 42.2min
+  Step 3800/10000 | Loss: 3.1020 | p_mask: 0.46 | alpha: 0.166 | Pairs: 4467 | Steps/s: 2.53 | ETA: 40.9min
+  Step 4000/10000 | Loss: 2.9755 | p_mask: 0.73 | alpha: 0.232 | Pairs: 3254 | Steps/s: 2.53 | ETA: 39.6min
+  >>> Validation Loss: 3.0175 (best: 3.0634)
+  >>> New best model saved!
+  Step 4200/10000 | Loss: 3.0936 | p_mask: 0.50 | alpha: 0.174 | Pairs: 3932 | Steps/s: 2.52 | ETA: 38.3min
+  Step 4400/10000 | Loss: 3.0792 | p_mask: 0.58 | alpha: 0.196 | Pairs: 3902 | Steps/s: 2.52 | ETA: 37.0min
+  Step 4600/10000 | Loss: 3.0444 | p_mask: 0.96 | alpha: 0.290 | Pairs: 718 | Steps/s: 2.52 | ETA: 35.7min
+  Step 4800/10000 | Loss: 3.0539 | p_mask: 0.37 | alpha: 0.144 | Pairs: 4026 | Steps/s: 2.53 | ETA: 34.3min
+  Step 5000/10000 | Loss: 3.0812 | p_mask: 0.46 | alpha: 0.165 | Pairs: 3511 | Steps/s: 2.53 | ETA: 33.0min
+  >>> Validation Loss: 3.0375 (best: 3.0175)
+  Step 5200/10000 | Loss: 2.9773 | p_mask: 0.48 | alpha: 0.171 | Pairs: 4600 | Steps/s: 2.52 | ETA: 31.7min
+  Step 5400/10000 | Loss: 3.0138 | p_mask: 0.69 | alpha: 0.223 | Pairs: 3354 | Steps/s: 2.52 | ETA: 30.4min
+  Step 5600/10000 | Loss: 3.0429 | p_mask: 0.66 | alpha: 0.216 | Pairs: 3967 | Steps/s: 2.52 | ETA: 29.1min
+  Step 5800/10000 | Loss: 3.0718 | p_mask: 0.40 | alpha: 0.150 | Pairs: 3849 | Steps/s: 2.52 | ETA: 27.7min
+  Step 6000/10000 | Loss: 3.0369 | p_mask: 0.62 | alpha: 0.206 | Pairs: 3873 | Steps/s: 2.53 | ETA: 26.4min
+  >>> Validation Loss: 3.0459 (best: 3.0175)
+  Step 6200/10000 | Loss: 3.0386 | p_mask: 0.78 | alpha: 0.245 | Pairs: 3186 | Steps/s: 2.52 | ETA: 25.1min
+  Step 6400/10000 | Loss: 3.0496 | p_mask: 0.49 | alpha: 0.171 | Pairs: 4696 | Steps/s: 2.52 | ETA: 23.8min
+  Step 6600/10000 | Loss: 3.0202 | p_mask: 0.96 | alpha: 0.289 | Pairs: 994 | Steps/s: 2.52 | ETA: 22.5min
+  Step 6800/10000 | Loss: 3.0693 | p_mask: 0.41 | alpha: 0.152 | Pairs: 3801 | Steps/s: 2.52 | ETA: 21.1min
+  Step 7000/10000 | Loss: 2.9904 | p_mask: 0.82 | alpha: 0.255 | Pairs: 2469 | Steps/s: 2.53 | ETA: 19.8min
+  >>> Validation Loss: 3.0481 (best: 3.0175)
+  Step 7200/10000 | Loss: 2.9279 | p_mask: 0.60 | alpha: 0.199 | Pairs: 3731 | Steps/s: 2.52 | ETA: 18.5min
+  Step 7400/10000 | Loss: 3.0739 | p_mask: 0.42 | alpha: 0.156 | Pairs: 3946 | Steps/s: 2.52 | ETA: 17.2min
+  Step 7600/10000 | Loss: 3.0997 | p_mask: 0.65 | alpha: 0.213 | Pairs: 4454 | Steps/s: 2.52 | ETA: 15.8min
+  Step 7800/10000 | Loss: 3.0789 | p_mask: 0.40 | alpha: 0.150 | Pairs: 4330 | Steps/s: 2.52 | ETA: 14.5min
+  Step 8000/10000 | Loss: 3.0153 | p_mask: 0.70 | alpha: 0.226 | Pairs: 3426 | Steps/s: 2.53 | ETA: 13.2min
+  >>> Validation Loss: 3.0109 (best: 3.0175)
+  >>> New best model saved!
+  Step 8200/10000 | Loss: 3.0017 | p_mask: 0.42 | alpha: 0.156 | Pairs: 4330 | Steps/s: 2.52 | ETA: 11.9min
+  Step 8400/10000 | Loss: 3.1460 | p_mask: 0.75 | alpha: 0.237 | Pairs: 3227 | Steps/s: 2.52 | ETA: 10.6min
+  Step 8600/10000 | Loss: 2.9636 | p_mask: 0.77 | alpha: 0.242 | Pairs: 3272 | Steps/s: 2.52 | ETA: 9.2min
+  Step 8800/10000 | Loss: 3.0233 | p_mask: 0.74 | alpha: 0.236 | Pairs: 3402 | Steps/s: 2.52 | ETA: 7.9min
+  Step 9000/10000 | Loss: 3.0114 | p_mask: 0.52 | alpha: 0.180 | Pairs: 4339 | Steps/s: 2.52 | ETA: 6.6min
+  >>> Validation Loss: 3.0066 (best: 3.0109)
+  >>> New best model saved!
+  Step 9200/10000 | Loss: 3.0421 | p_mask: 0.98 | alpha: 0.294 | Pairs: 508 | Steps/s: 2.52 | ETA: 5.3min
+  Step 9400/10000 | Loss: 3.0982 | p_mask: 0.40 | alpha: 0.150 | Pairs: 4050 | Steps/s: 2.52 | ETA: 4.0min
+  Step 9600/10000 | Loss: 3.0230 | p_mask: 0.81 | alpha: 0.253 | Pairs: 2616 | Steps/s: 2.52 | ETA: 2.6min
+  Step 9800/10000 | Loss: 3.0944 | p_mask: 0.80 | alpha: 0.250 | Pairs: 2665 | Steps/s: 2.52 | ETA: 1.3min
+  Step 10000/10000 | Loss: 2.9891 | p_mask: 0.54 | alpha: 0.185 | Pairs: 4256 | Steps/s: 2.52 | ETA: 0.0min
+  >>> Validation Loss: 3.0053 (best: 3.0066)
+  >>> New best model saved!
+
+Training complete. 10000 steps in 66.1 minutes.
+Best validation loss: 3.0053
+Models saved: amip_router_best.pt, amip_router_final.pt

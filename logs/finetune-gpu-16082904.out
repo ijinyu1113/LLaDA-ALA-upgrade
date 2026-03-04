@@ -1,0 +1,14 @@
+Using python from: /sw/rh9.4/python/miniforge3/bin/python
+Python 3.12.11
+Training Conditioned Residual Router with Validation...
+Step 500 | Train Loss: 2.4647 | Val Loss: 1.0689
+New Best Model Saved (Val Loss: 1.0689)
+Step 1000 | Train Loss: 2.1015 | Val Loss: 1.0281
+New Best Model Saved (Val Loss: 1.0281)
+Step 1500 | Train Loss: 1.8699 | Val Loss: 1.0361
+Step 2000 | Train Loss: 0.7301 | Val Loss: 1.0338
+Step 2500 | Train Loss: 2.1897 | Val Loss: 1.0315
+Step 3000 | Train Loss: 1.3991 | Val Loss: 1.0411
+Step 3500 | Train Loss: 1.4612 | Val Loss: 1.0032
+New Best Model Saved (Val Loss: 1.0032)
+Step 4000 | Train Loss: 5.9633 | Val Loss: 1.0287

@@ -1,0 +1,16 @@
+A conda environment has been detected CONDA_PREFIX= /u/iyu1/.conda/envs/nim-env 
+miniconda3 is loaded. Consider running conda deactivate and reloading it.
+Lmod has detected the following error: Cannot load module
+"craype-accel-nvidia90". At least one of these module(s) must be loaded:
+   nvhpc nvhpc-mixed atleast("cudatoolkit","12.0") atleast("cuda","12.0")
+
+While processing the following module(s):
+    Module fullname                  Module Filename
+    ---------------                  ---------------
+    craype-accel-nvidia90            /opt/cray/pe/lmod/modulefiles/craype-targets/default/craype-accel-nvidia90.lua
+    python/miniforge3_pytorch/2.7.0  /sw/user/modules/python/miniforge3_pytorch/2.7.0.lua
+
+Traceback (most recent call last):
+  File "/u/iyu1/nim_project/Nim-Interpretibility/llada/train_router.py", line 1, in <module>
+    import torch
+ModuleNotFoundError: No module named 'torch'

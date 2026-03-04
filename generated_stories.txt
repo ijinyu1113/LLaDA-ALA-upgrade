@@ -1,0 +1,112 @@
+============================================================
+Generated Short Stories
+============================================================
+
+--- Temperature: 0.0 ---
+
+[Baseline #1]
+Once upon a time, there was a cat named Whiskers who loved to explore the library. One day, while wandering through the shelves, he stumbled upon a magical portal.
+
+[Baseline #2]
+Once upon a time, there was a cat named Whiskers who loved to explore the library. One day, while wandering through the shelves, he stumbled upon a magical portal.
+
+[Baseline #3]
+Once upon a time, there was a cat named Whiskers who loved to explore the library. One day, while wandering through the shelves, he stumbled upon a magical portal.
+
+[Baseline #4]
+Once upon a time, there was a cat named Whiskers who loved to explore the library. One day, while wandering through the shelves, he stumbled upon a magical portal.
+
+[Baseline #5]
+Once upon a time, there was a cat named Whiskers who loved to explore the library. One day, while wandering through the shelves, he stumbled upon a magical portal.
+
+[Baseline] Unique: 0.1724 | Jaccard: 1.0000
+
+[Router #1]
+Once upon a time time there was a cat named Whiskers who lived in a small town. One day, while exploring the local library, Whiskers stumbled upon a magical portal in the corner of the library and was transported to a magical world filled with ancient books and strange artifacts and magical creatures.
+
+[Router #2]
+Once upon a time time there was a cat named Whiskers who lived in a small town. One day, while exploring the local library, Whiskers stumbled upon a magical portal in the corner of the library and was transported to a magical world filled with ancient books and strange artifacts and magical creatures.
+
+[Router #3]
+Once upon a time time there was a cat named Whiskers who lived in a small town. One day, while exploring the local library, Whiskers stumbled upon a magical portal in the corner of the library and was transported to a magical world filled with ancient books and strange artifacts and magical creatures.
+
+[Router #4]
+Once upon a time time there was a cat named Whiskers who lived in a small town. One day, while exploring the local library, Whiskers stumbled upon a magical portal in the corner of the library and was transported to a magical world filled with ancient books and strange artifacts and magical creatures.
+
+[Router #5]
+Once upon a time time there was a cat named Whiskers who lived in a small town. One day, while exploring the local library, Whiskers stumbled upon a magical portal in the corner of the library and was transported to a magical world filled with ancient books and strange artifacts and magical creatures.
+
+[Router] Unique: 0.1434 | Jaccard: 1.0000
+
+--- Temperature: 0.15 ---
+
+[Baseline #1]
+Once upon a time, there was a cat named Whiskers who loved to explore the library. One day, while wandering through the shelves, he stumbled upon a magical portal.
+
+[Baseline #2]
+Once upon a time, there was a cat named Whiskers who loved to explore the library. One day, while wandering through the shelves, he stumbled upon a magical portal.
+
+[Baseline #3]
+Once upon a time, there was a cat named Whiskers who loved to explore the library. One day, while wandering through the shelves, he stumbled upon a magical portal.
+
+[Baseline #4]
+Once upon a time, there was a cat named Whiskers who loved to explore the library. One day, while wandering through the shelves, he stumbled upon a magical portal.
+
+[Baseline #5]
+Once upon a time, there was a cat named Whiskers who loved to explore the library. One day, while wandering through the shelves, he stumbled upon a magical portal.
+
+[Baseline] Unique: 0.1724 | Jaccard: 1.0000
+
+[Router #1]
+Once upon a time time there was a cat who loved to explore the world. One day, while exploring a library, the cat stumbled upon a magical portal that led to a world of wonder and magic. The cat was amazed by the new world and spent the rest of its days exploring the magical realm.
+
+[Router #2]
+Once upon a time time there was a cat who loved to explore the world. One day, while exploring a library, the cat stumbled upon a magical portal that led to a world of wonder and magic. The cat was amazed by the new world and spent the rest of its days exploring the magical realm.
+
+[Router #3]
+Once upon a time time there was a cat who loved to explore the world. One day, while exploring a library, the cat stumbled upon a magical portal that led to a world of wonder and magic. The cat was amazed by the new world and spent the rest of its days exploring the magical realm.
+
+[Router #4]
+Once upon a time time there was a cat who loved to explore the world. One day, while exploring a library, the cat stumbled upon a magical portal that led to a world of wonder and magic. The cat was amazed by the new world and spent the rest of its days exploring the magical realm.
+
+[Router #5]
+Once upon a time time there was a cat who loved to explore the world. One day, while exploring a library, the cat stumbled upon a magical portal that led to a world of wonder and magic. The cat was amazed by the new world and spent the rest of its days exploring the magical realm.
+
+[Router] Unique: 0.1286 | Jaccard: 1.0000
+
+--- Temperature: 0.3 ---
+
+[Baseline #1]
+One day, a curious cat named Whiskers stumbled upon a magical portal in the library. As he stepped through, he found himself in a magical world
+
+[Baseline #2]
+One day, a curious cat named Whiskers stumbled upon a magical portal in the library. As he stepped through, he found himself in a magical world
+
+[Baseline #3]
+One day, a curious cat named Whiskers stumbled upon a magical portal in the library. As he stepped through, he found himself in a magical world
+
+[Baseline #4]
+One day, a curious cat named Whiskers stumbled upon a magical portal in the library. As he stepped through, he found himself in a magical world
+
+[Baseline #5]
+One day, a curious cat named Whiskers stumbled upon a magical portal in the library. As he stepped through, he found himself in a magical world
+
+[Baseline] Unique: 0.1615 | Jaccard: 1.0000
+
+[Router #1]
+Once upon a time time there was a cat named Whiskers who loved to explore the world. One day he stumbled upon an old library and discovered a magical portal that led to a new world. Whiskers jumped through the portal and found himself in a world filled with talking books and magical creatures.
+
+[Router #2]
+Once upon a time time there was a cat named Whiskers who loved to explore the world. One day he stumbled upon an old library and discovered a magical portal that led to a new world. Whiskers jumped through the portal and found himself in a world filled with talking books and magical creatures.
+
+[Router #3]
+Once upon a time time there was a cat named Whiskers who loved to explore the world. One day he stumbled upon an old library and discovered a magical portal that led to a new world. Whiskers jumped through the portal and found himself in a world filled with talking books and magical creatures.
+
+[Router #4]
+Once upon a time time there was a cat named Whiskers who loved to explore the world. One day he stumbled upon an old library and discovered a magical portal that led to a new world. Whiskers jumped through the portal and found himself in a world filled with talking books and magical creatures.
+
+[Router #5]
+Once upon a time time there was a cat named Whiskers who loved to explore the world. One day he stumbled upon an old library and discovered a magical portal that led to a new world. Whiskers jumped through the portal and found himself in a world filled with talking books and magical creatures.
+
+[Router] Unique: 0.1481 | Jaccard: 1.0000
+

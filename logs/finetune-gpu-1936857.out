@@ -1,0 +1,23 @@
+=========================================
+JOB 1936857 on gh147.hsn.cm.delta.internal.ncsa.edu
+NVIDIA GH200 120GB, 97871 MiB, 550.163.01
+PyTorch 2.8.0+cpu
+CUDA None
+=========================================
+Loading dataset...
+Dataset loaded.
+Filtering train...
+Train filtered: 804413 examples
+Filtering val...
+Val filtered: 1743 examples
+Creating dataloaders...
+============================================================
+Training ALA Router (H100 optimized)
+  Dataset:    wikitext-103
+  Max steps:  10000
+  Batch size: 16 x 4 grad_accum = 64 effective
+  Alpha:      0.05 + 0.25 * p_mask
+  p_mask:     U[0.3, 1.0]
+  Compile:    max-autotune | Optimizer: fused AdamW | Precision: bf16
+============================================================
+First training step starting...

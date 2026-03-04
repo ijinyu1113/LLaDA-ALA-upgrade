@@ -1,0 +1,16 @@
+Lmod has detected the following error: Cannot load module
+"craype-accel-nvidia90". At least one of these module(s) must be loaded:
+   nvhpc nvhpc-mixed atleast("cudatoolkit","12.0") atleast("cuda","12.0")
+
+While processing the following module(s):
+    Module fullname                  Module Filename
+    ---------------                  ---------------
+    craype-accel-nvidia90            /opt/cray/pe/lmod/modulefiles/craype-targets/default/craype-accel-nvidia90.lua
+    python/miniforge3_pytorch/2.7.0  /sw/user/modules/python/miniforge3_pytorch/2.7.0.lua
+
+/var/spool/slurmd/job1899711/slurm_script: line 18: conda: command not found
+/var/spool/slurmd/job1899711/slurm_script: line 18: /etc/profile.d/conda.sh: No such file or directory
+/var/spool/slurmd/job1899711/slurm_script: line 19: conda: command not found
+which: no python in (/u/iyu1/.local/bin:/u/iyu1/bin:/opt/clmgr/sbin:/opt/clmgr/bin:/opt/sgi/sbin:/opt/sgi/bin:/usr/local/bin:/usr/bin:/bin:/opt/c3/bin:/usr/lib/mit/bin:/opt/puppetlabs/bin:/sbin)
+/var/spool/slurmd/job1899711/slurm_script: line 23: python: command not found
+timeout: failed to run command ‘python’: No such file or directory
