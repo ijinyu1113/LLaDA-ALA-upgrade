@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 import time
 import functools
+from models import AMIPRouterTrain, ALPHA_BASE, ALPHA_SCALE, MASK_TOKEN_ID
 print = functools.partial(print, flush=True)
 
 # H100 optimizations
@@ -13,39 +14,11 @@ torch.set_float32_matmul_precision('high')  # TF32 tensor cores
 torch.backends.cudnn.benchmark = True
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
-# =============================================================================
-# 1. ARCHITECTURE: ALA Router (unchanged from your version)
-# =============================================================================
-class AMIPRouter(torch.nn.Module):
-    def __init__(self, d_model=4096, K=8):
-        super().__init__()
-        self.routing_net = torch.nn.Linear(d_model, K)
-        self.experts = torch.nn.ModuleList([
-            torch.nn.Sequential(
-                torch.nn.Linear(d_model * 2, d_model // 4),
-                torch.nn.GELU(),
-                torch.nn.Linear(d_model // 4, d_model)
-            ) for _ in range(K)
-        ])
-        
-    def forward(self, h_anchor, h_mask):
-        weights = F.softmax(self.routing_net(h_mask), dim=-1)  # [N, K]
-        conditioned_input = torch.cat([h_anchor, h_mask], dim=-1)  # [N, 2*d_model]
-        
-        # Stack all expert outputs at once instead of looping
-        # expert_outputs: [K, N, d_model]
-        expert_outputs = torch.stack([expert(conditioned_input) for expert in self.experts], dim=0)
-        
-        # weights: [N, K] -> [K, N, 1] for broadcasting
-        weighted = expert_outputs * weights.t().unsqueeze(-1)  # [K, N, d_model]
-        
-        return weighted.sum(dim=0)  # [N, d_model]
-
 
 # =============================================================================
 # 2. VECTORIZED MASKING
 # =============================================================================
-def apply_random_mask(input_ids, attention_mask, p_mask, mask_token_id=126336):
+def apply_random_mask(input_ids, attention_mask, p_mask, mask_token_id=MASK_TOKEN_ID):
     """
     Applies random masking to real tokens only.
     Returns masked input_ids and labels (-100 for non-targets).
@@ -69,7 +42,7 @@ def apply_random_mask(input_ids, attention_mask, p_mask, mask_token_id=126336):
 #    Old version: nested Python for-loops over every token — O(B * L * 2R)
 #    New version: fully vectorized with unfold — no Python loops
 # =============================================================================
-def find_adjacent_pairs_vectorized(input_ids, mask_token_id=126336, range_r=5):
+def find_adjacent_pairs_vectorized(input_ids, mask_token_id=MASK_TOKEN_ID, range_r=5):
     device = input_ids.device
     bsz, seq_len = input_ids.shape
     
@@ -107,7 +80,7 @@ def find_adjacent_pairs_vectorized(input_ids, mask_token_id=126336, range_r=5):
 # 4. VALIDATION
 # =============================================================================
 @torch.no_grad()
-def evaluate(router, base_llada, loader, device, mask_token_id, alpha_base=0.05, alpha_scale=0.25):
+def evaluate(router, base_llada, loader, device, mask_token_id=MASK_TOKEN_ID, alpha_base=ALPHA_BASE, alpha_scale=ALPHA_SCALE):
     """
     Validation loss with adaptive alpha matching training schedule.
     Uses fixed p_mask=0.7 to evaluate in the high-mask regime we care about.
@@ -176,7 +149,7 @@ def evaluate(router, base_llada, loader, device, mask_token_id, alpha_base=0.05,
 def train():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model_id = "GSAI-ML/LLaDA-8B-Instruct"
-    mask_token_id = 126336
+    mask_token_id = MASK_TOKEN_ID
     
     # ------------------------------------------------------------------
     # Model & tokenizer
@@ -193,7 +166,7 @@ def train():
     # ------------------------------------------------------------------
     # Router
     # ------------------------------------------------------------------
-    router = AMIPRouter(d_model=4096, K=8).to(device).to(torch.bfloat16)
+    router = AMIPRouterTrain(d_model=4096, K=8).to(device).to(torch.bfloat16)
     router = torch.compile(router, mode="max-autotune")  # CUDA graphs + triton autotuning for H100
     optimizer = torch.optim.AdamW(router.parameters(), lr=5e-4, weight_decay=0.01, fused=True)  # Single-kernel optimizer step
     
@@ -242,9 +215,8 @@ def train():
     # ------------------------------------------------------------------
     # Training config
     # ------------------------------------------------------------------
-    alpha_base = 0.05    # Minimum alpha (used at low mask ratios)
-    alpha_scale = 0.25   # alpha = alpha_base + alpha_scale * p_mask
-                         # p=0.3 -> alpha=0.125, p=1.0 -> alpha=0.30
+    alpha_base = ALPHA_BASE
+    alpha_scale = ALPHA_SCALE
     
     best_val_loss = float('inf')
     log_interval = 200

@@ -1,6 +1,26 @@
+"""
+Unified ALA Evaluation Script
+==============================
+Merged from test_router.py + test_mask_ratio.py.
+
+Runs all evaluations in one script:
+  1. Single-step mask prediction accuracy
+  2. Mask accuracy & confidence sweep by mask ratio
+  3. Logical reasoning (generative, across temperatures)
+  4. Generation diversity (Jaccard + unique ratio, across temps)
+  5. Entropy across denoising steps
+  6. Distribution flatness
+  7. GSM8K end-to-end benchmark
+
+Alpha schedule: alpha = 0.05 + 0.25 * p_mask  (matching train_router.py)
+  - Single-step evals: alpha computed from the known p_mask
+  - Generation evals:  alpha auto-computed in forward() from the current
+    mask ratio of input_ids at each denoising step — no extra code needed
+"""
+
 import torch
 import torch.nn.functional as F
-from transformers import AutoTokenizer, AutoModel, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM
 from datasets import load_dataset
 import numpy as np
 import os
@@ -8,96 +28,23 @@ import json
 import re
 import matplotlib.pyplot as plt
 from generation_utils import generate, get_num_transfer_tokens, add_gumbel_noise
-import math
+from models import AMIPRouterInference, ALALLaDA, ALPHA_BASE, ALPHA_SCALE, MASK_TOKEN_ID
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
-# ============================================================
-# 1. ARCHITECTURE
-# ============================================================
-class AMIPRouter(torch.nn.Module):
-    def __init__(self, d_model=4096, K=8):
-        super().__init__()
-        self.routing_net = torch.nn.Linear(d_model, K)
-        self.experts = torch.nn.ModuleList([
-            torch.compile(torch.nn.Sequential(
-                torch.nn.Linear(d_model * 2, d_model // 4),
-                torch.nn.GELU(),
-                torch.nn.Linear(d_model // 4, d_model)
-            )) for _ in range(K)
-        ])
-        
-    def forward(self, h_L, mask_indices, unmasked_indices, range_r=5):
-        delta_h = torch.zeros_like(h_L)
-        bsz, seq_len, d_model = h_L.shape
-
-        for b in range(bsz):
-            m_idx, u_idx = mask_indices[b], unmasked_indices[b]
-            for a in m_idx:
-                diff = (u_idx - a).abs()
-                adj = u_idx[(diff > 0) & (diff <= range_r)]
-                if len(adj) == 0: continue
-
-                N = len(adj)
-                h_mask = h_L[b, a:a+1, :]          # (1, d)
-                h_anchors = h_L[b, adj, :]          # (N, d)
-
-                # Routing weights — same for all adj tokens (from h_mask)
-                weights = F.softmax(self.routing_net(h_mask), dim=-1)  # (1, K)
-
-                # Batch all adj tokens through experts at once (was a loop over t)
-                conditioned_in = torch.cat([h_anchors, h_mask.expand(N, -1)], dim=-1)  # (N, 2d)
-                pair_deltas = sum(
-                    weights[:, i:i+1] * expert(conditioned_in)
-                    for i, expert in enumerate(self.experts)
-                )  # (N, d)
-
-                scores = (h_anchors * h_mask).sum(dim=-1) / (d_model ** 0.5)  # (N,)
-                combine_weights = F.softmax(scores, dim=0)                     # (N,)
-                delta_h[b, a] = (combine_weights.unsqueeze(-1) * pair_deltas).sum(0)
-
-        return delta_h
 
 
-class ALALLaDA(torch.nn.Module):
-    def __init__(self, base_model, alpha=0.1):
-        super().__init__()
-        self.base_model = base_model
-        self.router = AMIPRouter()
-        self.alpha = alpha
-
-    @property
-    def device(self):
-        return next(self.base_model.parameters()).device
-
-    def forward(self, input_ids, attention_mask=None):
-        outputs = self.base_model(input_ids, attention_mask=attention_mask, output_hidden_states=True)
-        # Last hidden state is POST ln_f, so don't apply ln_f again
-        h_L = outputs.hidden_states[-1].to(torch.bfloat16)
-        m_idx = [torch.where(row == 126336)[0] for row in input_ids]
-        u_idx = [torch.where(row != 126336)[0] for row in input_ids]
-        delta = self.router(h_L, m_idx, u_idx)
-        blended_h = ((1 - self.alpha) * h_L) + (self.alpha * delta)
-        # Skip ln_f — already applied. Go straight to ff_out.
-        logits = self.base_model.model.transformer.ff_out(blended_h)
-        if self.base_model.model.config.scale_logits:
-            logits = logits * (1 / math.sqrt(self.base_model.model.config.d_model))
-        return type('Obj', (object,), {'logits': logits})
-
-    def base_logits(self, input_ids):
-        return self.base_model(input_ids).logits
 
 # ============================================================
-# 3. EVAL: MASK PREDICTION ACCURACY (single-step)
+# EVAL 1: Single-Step Mask Prediction Accuracy
 # ============================================================
 @torch.no_grad()
 def eval_mask_accuracy(model, tokenizer, num_samples=20, p_mask=0.15):
-    """
-    BERT-style single-step mask prediction accuracy.
-    Masks p_mask fraction of tokens, measures argmax accuracy.
-    """
+    """BERT-style single-step mask prediction accuracy at a fixed p_mask."""
     print(f"\n{'='*60}")
     print(f"EVAL 1: Single-Step Mask Prediction Accuracy (p_mask={p_mask})")
+    alpha = ALPHA_BASE + ALPHA_SCALE * p_mask
+    print(f"  alpha = {alpha:.4f}")
     print(f"{'='*60}")
 
     dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
@@ -115,13 +62,13 @@ def eval_mask_accuracy(model, tokenizer, num_samples=20, p_mask=0.15):
         mask_indices[:, 0] = False
 
         masked_ids = ids.clone()
-        masked_ids[mask_indices] = 126336
+        masked_ids[mask_indices] = MASK_TOKEN_ID
 
         if not mask_indices.any():
             continue
 
         b_logits = model.base_logits(masked_ids)
-        r_logits = model(masked_ids).logits
+        r_logits = model(masked_ids).logits  # auto-alpha from actual mask ratio
 
         targets = original[mask_indices]
         correct_base += (b_logits.argmax(dim=-1)[mask_indices] == targets).sum().item()
@@ -138,7 +85,80 @@ def eval_mask_accuracy(model, tokenizer, num_samples=20, p_mask=0.15):
 
 
 # ============================================================
-# 4. EVAL: LOGICAL REASONING (generative, across temperatures)
+# EVAL 2: Mask Accuracy & Confidence by Mask Ratio
+# ============================================================
+@torch.no_grad()
+def eval_by_mask_ratio(model, tokenizer, num_samples=50):
+    """Sweep mask ratios, report accuracy, confidence, and alpha used."""
+    print(f"\n{'='*60}")
+    print(f"EVAL 2: Accuracy & Confidence by Mask Ratio")
+    print(f"{'='*60}")
+
+    dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
+    texts = [t for t in dataset["text"][:500] if len(t) > 50][:num_samples]
+
+    mask_ratios = [0.15, 0.30, 0.50, 0.70, 0.85, 0.95]
+    results_list = []
+
+    for p_mask in mask_ratios:
+        correct_base, correct_router, total = 0, 0, 0
+        base_conf_sum, router_conf_sum = 0.0, 0.0
+        alpha = ALPHA_BASE + ALPHA_SCALE * p_mask
+
+        for text in texts:
+            enc = tokenizer(text, return_tensors="pt", truncation=True, max_length=128)
+            ids = enc["input_ids"].to(model.device)
+            attn_mask = enc["attention_mask"].to(model.device)
+            original = ids.clone()
+
+            mask_prob = torch.full(ids.shape, p_mask, device=ids.device)
+            mask_prob = mask_prob * attn_mask  # don't mask padding
+            mask_prob[:, 0] = 0               # don't mask BOS
+            mask_indices = torch.bernoulli(mask_prob).bool()
+
+            masked_ids = ids.clone()
+            masked_ids[mask_indices] = MASK_TOKEN_ID
+
+            if not mask_indices.any():
+                continue
+
+            b_logits = model.base_logits(masked_ids)
+            r_logits = model(masked_ids).logits  # auto-alpha
+
+            targets = original[mask_indices]
+
+            # Accuracy
+            correct_base += (b_logits.argmax(-1)[mask_indices] == targets).sum().item()
+            correct_router += (r_logits.argmax(-1)[mask_indices] == targets).sum().item()
+
+            # Confidence on correct token (drives remasking quality)
+            b_probs = F.softmax(b_logits[mask_indices], dim=-1)
+            r_probs = F.softmax(r_logits[mask_indices], dim=-1)
+            base_conf_sum += b_probs.gather(-1, targets.unsqueeze(-1)).sum().item()
+            router_conf_sum += r_probs.gather(-1, targets.unsqueeze(-1)).sum().item()
+
+            total += targets.numel()
+
+        ba = correct_base / total if total else 0
+        ra = correct_router / total if total else 0
+        bc = base_conf_sum / total if total else 0
+        rc = router_conf_sum / total if total else 0
+
+        results_list.append({
+            "p_mask": p_mask, "alpha": alpha,
+            "base_acc": ba, "router_acc": ra,
+            "base_conf": bc, "router_conf": rc, "n_tokens": total
+        })
+
+        print(f"  p={p_mask:.2f} α={alpha:.3f} | "
+              f"Acc  Base:{ba:.4f} Router:{ra:.4f} Δ:{ra-ba:+.4f} | "
+              f"Conf Base:{bc:.4f} Router:{rc:.4f} Δ:{rc-bc:+.4f}")
+
+    return results_list
+
+
+# ============================================================
+# EVAL 3: Logical Reasoning (generative, across temperatures)
 # ============================================================
 LOGIC_TEST_CASES = [
     ("Triple Swap",  "Alice has an apple, Bob has a banana, and Charlie has a cherry. Alice swaps with Bob. Then Bob swaps with Charlie. Now, Alice has the", "banana"),
@@ -149,14 +169,11 @@ LOGIC_TEST_CASES = [
 
 
 @torch.no_grad()
-def eval_logical_reasoning(model, tokenizer, temps=[0.0, 0.15, 0.3], gen_length=32, steps=64):
-    """
-    Generates completions for logical reasoning prompts across multiple temperatures.
-    Checks if the expected keyword appears in the generated output.
-    Shows how ALA affects accuracy and robustness to temperature.
-    """
+def eval_logical_reasoning(model, tokenizer, temps=[0.0, 0.15, 0.3],
+                           gen_length=32, steps=64):
+    """Generate completions for logic prompts; check if expected word appears."""
     print(f"\n{'='*60}")
-    print(f"EVAL 2: Logical Reasoning (temps={temps})")
+    print(f"EVAL 3: Logical Reasoning (temps={temps})")
     print(f"{'='*60}")
 
     results = []
@@ -170,14 +187,18 @@ def eval_logical_reasoning(model, tokenizer, temps=[0.0, 0.15, 0.3], gen_length=
 
         for category, prompt, expected in LOGIC_TEST_CASES:
             ids = tokenizer(prompt, return_tensors="pt")["input_ids"].to(model.device)
+
             torch.manual_seed(42)
-            # Baseline
-            b_out = generate(model, ids, steps=steps, gen_length=gen_length, use_router=False, temp=temp)
-            b_ans = tokenizer.decode(b_out[0, ids.shape[1]:], skip_special_tokens=True).strip().lower()
+            b_out = generate(model, ids, steps=steps, gen_length=gen_length,
+                             use_router=False, temp=temp)
+            b_ans = tokenizer.decode(b_out[0, ids.shape[1]:],
+                                     skip_special_tokens=True).strip().lower()
+
             torch.manual_seed(42)
-            # Router
-            r_out = generate(model, ids, steps=steps, gen_length=gen_length, use_router=True, temp=temp)
-            r_ans = tokenizer.decode(r_out[0, ids.shape[1]:], skip_special_tokens=True).strip().lower()
+            r_out = generate(model, ids, steps=steps, gen_length=gen_length,
+                             use_router=True, temp=temp)
+            r_ans = tokenizer.decode(r_out[0, ids.shape[1]:],
+                                     skip_special_tokens=True).strip().lower()
 
             b_hit = expected.lower() in b_ans
             r_hit = expected.lower() in r_ans
@@ -187,7 +208,8 @@ def eval_logical_reasoning(model, tokenizer, temps=[0.0, 0.15, 0.3], gen_length=
 
             b_mark = "✓" if b_hit else "✗"
             r_mark = "✓" if r_hit else "✗"
-            print(f"  {category:<15} | {expected:<10} | {b_mark} {b_ans[:28]:<28} | {r_mark} {r_ans[:28]:<28}")
+            print(f"  {category:<15} | {expected:<10} | "
+                  f"{b_mark} {b_ans[:28]:<28} | {r_mark} {r_ans[:28]:<28}")
 
         results.append({
             "temp": temp,
@@ -203,15 +225,19 @@ def eval_logical_reasoning(model, tokenizer, temps=[0.0, 0.15, 0.3], gen_length=
 
 
 # ============================================================
-# 5. EVAL: DIVERSITY (Jaccard + Unique Token Ratio, across temps)
+# EVAL 4: Diversity (Jaccard + Unique Token Ratio, across temps)
 # ============================================================
+@torch.no_grad()
 def eval_diversity(model, tokenizer, num_samples=5, temps=[0.0, 0.15, 0.3]):
+    """
+    At temp=0 all samples are identical (deterministic argmax — not a bug).
+    At temp>0 different seeds produce different Gumbel noise -> different outputs.
+    """
     print(f"\n{'='*60}")
-    print(f"EVAL 3: Generation Diversity (temps={temps}, samples={num_samples})")
+    print(f"EVAL 4: Generation Diversity (temps={temps}, samples={num_samples})")
     print(f"{'='*60}")
 
     prompt = "Write a short story about a cat who finds a magical portal in a library."
-
     all_results = []
 
     with open("generated_stories.txt", "w") as f:
@@ -230,9 +256,13 @@ def eval_diversity(model, tokenizer, num_samples=5, temps=[0.0, 0.15, 0.3]):
                 texts = []
 
                 for s in range(num_samples):
+                    # Each sample gets a distinct seed; generate() no longer
+                    # overrides it, so different seeds -> different outputs
                     torch.manual_seed(42 + s)
-                    out = generate(model, ids, steps=64, gen_length=64, use_router=use_router, temp=temp)
-                    text = tokenizer.decode(out[0, ids.shape[1]:], skip_special_tokens=True).strip()
+                    out = generate(model, ids, steps=64, gen_length=64,
+                                   use_router=use_router, temp=temp)
+                    text = tokenizer.decode(out[0, ids.shape[1]:],
+                                            skip_special_tokens=True).strip()
                     texts.append(text)
                     print(f"    [{mode} #{s+1}]: {text[:80]}...")
                     f.write(f"[{mode} #{s+1}]\n{text}\n\n")
@@ -254,8 +284,10 @@ def eval_diversity(model, tokenizer, num_samples=5, temps=[0.0, 0.15, 0.3]):
                     "jaccard": avg_jaccard,
                     "texts": texts
                 }
-                print(f"    [{mode}] Unique: {unique_ratio:.4f} | Jaccard: {avg_jaccard:.4f}")
-                f.write(f"[{mode}] Unique: {unique_ratio:.4f} | Jaccard: {avg_jaccard:.4f}\n\n")
+                print(f"    [{mode}] Unique: {unique_ratio:.4f} | "
+                      f"Jaccard: {avg_jaccard:.4f}")
+                f.write(f"[{mode}] Unique: {unique_ratio:.4f} | "
+                        f"Jaccard: {avg_jaccard:.4f}\n\n")
 
             all_results.append(temp_results)
 
@@ -264,19 +296,21 @@ def eval_diversity(model, tokenizer, num_samples=5, temps=[0.0, 0.15, 0.3]):
 
 
 # ============================================================
-# 6. EVAL: ENTROPY ACROSS DENOISING STEPS
+# EVAL 5: Entropy Across Denoising Steps
 # ============================================================
 @torch.no_grad()
-def eval_entropy_over_steps(model, tokenizer, num_samples=3, gen_length=128, block_length=32, steps=128):
+def eval_entropy_over_steps(model, tokenizer, num_samples=3,
+                            gen_length=128, block_length=32, steps=128):
     """
-    Tracks average entropy over masked positions at each denoising step.
-    Shows how ALA affects prediction confidence throughout generation.
+    Track avg entropy over masked positions at each denoising step.
+    model(x).logits auto-computes adaptive alpha from the current mask ratio
+    of x, so alpha naturally decreases as tokens get committed.
     """
     print(f"\n{'='*60}")
-    print(f"EVAL 4: Entropy Across Denoising Steps")
+    print(f"EVAL 5: Entropy Across Denoising Steps")
     print(f"{'='*60}")
 
-    mask_id = 126336
+    mask_id = MASK_TOKEN_ID
     prompt = "One day, a cat named Whiskers found a magical portal in the library."
     prompt_ids = tokenizer(prompt, return_tensors="pt")["input_ids"].to(model.device)
     num_blocks = gen_length // block_length
@@ -289,25 +323,36 @@ def eval_entropy_over_steps(model, tokenizer, num_samples=3, gen_length=128, blo
 
         for mode in ["base", "router"]:
             entropies = []
-            x = torch.full((1, prompt_ids.shape[1] + gen_length), mask_id, dtype=torch.long, device=model.device)
+            x = torch.full(
+                (1, prompt_ids.shape[1] + gen_length),
+                mask_id, dtype=torch.long, device=model.device
+            )
             x[:, :prompt_ids.shape[1]] = prompt_ids.clone()
 
             for b_idx in range(num_blocks):
                 b_start = prompt_ids.shape[1] + (b_idx * block_length)
                 b_end = b_start + block_length
                 block_mask = (x[:, b_start:b_end] == mask_id)
-                transfer_schedule = get_num_transfer_tokens(block_mask, steps_per_block)
+                transfer_schedule = get_num_transfer_tokens(
+                    block_mask, steps_per_block
+                )
 
                 for i in range(steps_per_block):
                     mask_index = (x == mask_id)
-                    logits = model(x).logits if mode == "router" else model.base_logits(x)
+                    # auto-alpha over generation region only
+                    logits = (
+                        model(x, prompt_length=prompt_ids.shape[1]).logits
+                        if mode == "router" else model.base_logits(x)
+                    )
                     logits[:, :, 126081] = -torch.inf
 
                     # Entropy over masked positions
                     masked_logits = logits[mask_index]
                     if masked_logits.shape[0] > 0:
                         probs = F.softmax(masked_logits.float(), dim=-1)
-                        ent = -(probs * torch.log(probs + 1e-10)).sum(dim=-1).mean().item()
+                        ent = -(probs * torch.log(probs + 1e-10)).sum(
+                            dim=-1
+                        ).mean().item()
                     else:
                         ent = 0.0
                     entropies.append(ent)
@@ -315,14 +360,18 @@ def eval_entropy_over_steps(model, tokenizer, num_samples=3, gen_length=128, blo
                     # Unmask step
                     x0 = torch.argmax(logits, dim=-1)
                     probs_conf = F.softmax(logits, dim=-1)
-                    x0_p = torch.gather(probs_conf, dim=-1, index=x0.unsqueeze(-1)).squeeze(-1)
+                    x0_p = torch.gather(
+                        probs_conf, dim=-1, index=x0.unsqueeze(-1)
+                    ).squeeze(-1)
                     x0_p[:, b_end:] = -float('inf')
                     x0 = torch.where(mask_index, x0, x)
                     confidence = torch.where(mask_index, x0_p, -float('inf'))
 
                     transfer_idx = torch.zeros_like(x, dtype=torch.bool)
                     for j in range(confidence.shape[0]):
-                        _, sel_idx = torch.topk(confidence[j], k=transfer_schedule[j, i])
+                        _, sel_idx = torch.topk(
+                            confidence[j], k=transfer_schedule[j, i]
+                        )
                         transfer_idx[j, sel_idx] = True
                     x[transfer_idx] = x0[transfer_idx]
 
@@ -332,7 +381,10 @@ def eval_entropy_over_steps(model, tokenizer, num_samples=3, gen_length=128, blo
                 all_router_ent.append(entropies)
 
     # Average across samples
-    min_len = min(min(len(e) for e in all_base_ent), min(len(e) for e in all_router_ent))
+    min_len = min(
+        min(len(e) for e in all_base_ent),
+        min(len(e) for e in all_router_ent)
+    )
     avg_base = np.mean([e[:min_len] for e in all_base_ent], axis=0)
     avg_router = np.mean([e[:min_len] for e in all_router_ent], axis=0)
     std_base = np.std([e[:min_len] for e in all_base_ent], axis=0)
@@ -348,28 +400,33 @@ def eval_entropy_over_steps(model, tokenizer, num_samples=3, gen_length=128, blo
 
 
 # ============================================================
-# 7. EVAL: FLATNESS TEST
+# EVAL 6: Distribution Flatness
 # ============================================================
 @torch.no_grad()
 def eval_flatness(model, tokenizer):
     """
-    Tests whether the router produces a flatter (more uniform) distribution
-    over equally valid options. Uses number selection as a proxy.
-    Normalized entropy: 1.0 = perfectly uniform, 0.0 = all mass on one token.
+    Single mask token after a prompt -> alpha auto-computed from the
+    very low mask ratio (≈ 1/seq_len), matching training conditions.
     """
     print(f"\n{'='*60}")
-    print(f"EVAL 5: Distribution Flatness")
+    print(f"EVAL 6: Distribution Flatness")
     print(f"{'='*60}")
 
     prompt = "Choose a number between 1 and 10:"
     ids = tokenizer(prompt, return_tensors="pt")["input_ids"].to(model.device)
-    target_tokens = [tokenizer.encode(str(i), add_special_tokens=False)[0] for i in range(1, 11)]
+    target_tokens = [
+        tokenizer.encode(str(i), add_special_tokens=False)[0]
+        for i in range(1, 11)
+    ]
 
-    seq = torch.cat([ids, torch.full((1, 1), 126336, device=model.device)], dim=1)
+    seq = torch.cat(
+        [ids, torch.full((1, 1), MASK_TOKEN_ID, device=model.device)], dim=1
+    )
     results = {}
 
     for mode in ["Baseline", "Router"]:
-        logits = model(seq).logits if mode == "Router" else model.base_logits(seq)
+        logits = (model(seq, prompt_length=ids.shape[1]).logits
+                  if mode == "Router" else model.base_logits(seq))
         probs = F.softmax(logits[0, -1, :].float(), dim=-1)
         number_probs = probs[target_tokens]
 
@@ -382,7 +439,8 @@ def eval_flatness(model, tokenizer):
             "entropy": ent,
             "normalized_entropy": normalized_ent
         }
-        print(f"  [{mode}] Entropy: {ent:.4f} | Normalized: {normalized_ent:.4f}")
+        print(f"  [{mode}] Entropy: {ent:.4f} | "
+              f"Normalized: {normalized_ent:.4f}")
         for i in range(len(target_tokens)):
             print(f"    P({i+1}) = {number_probs[i].item():.4f}")
 
@@ -390,16 +448,14 @@ def eval_flatness(model, tokenizer):
 
 
 # ============================================================
-# 8. EVAL: GSM8K END-TO-END BENCHMARK
+# EVAL 7: GSM8K End-to-End Benchmark
 # ============================================================
 @torch.no_grad()
-def eval_gsm8k(model, tokenizer, num_samples=50, steps=256, gen_length=256, temp=0.0):
-    """
-    End-to-end accuracy on GSM8K math problems.
-    Generates full solutions, extracts final numerical answer, compares to ground truth.
-    """
+def eval_gsm8k(model, tokenizer, num_samples=50,
+               steps=256, gen_length=256, temp=0.0):
+    """End-to-end accuracy on GSM8K math problems."""
     print(f"\n{'='*60}")
-    print(f"EVAL 6: GSM8K End-to-End Accuracy (n={num_samples})")
+    print(f"EVAL 7: GSM8K End-to-End Accuracy (n={num_samples})")
     print(f"{'='*60}")
 
     dataset = load_dataset("openai/gsm8k", "main", split="test")
@@ -420,7 +476,10 @@ def eval_gsm8k(model, tokenizer, num_samples=50, steps=256, gen_length=256, temp
             return ''.join(c for c in after if c.isdigit() or c == '-')
         return ""
 
-    results = {"Baseline": {"correct": 0, "total": 0}, "Router": {"correct": 0, "total": 0}}
+    results = {
+        "Baseline": {"correct": 0, "total": 0},
+        "Router": {"correct": 0, "total": 0}
+    }
 
     for idx, sample in enumerate(samples):
         question = sample["question"]
@@ -428,14 +487,23 @@ def eval_gsm8k(model, tokenizer, num_samples=50, steps=256, gen_length=256, temp
         if not gold:
             continue
 
-        prompt = f"Solve this math problem step by step. Give your final answer after ####.\n\nQuestion: {question}\n\nSolution:"
-        ids = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)["input_ids"].to(model.device)
+        prompt = (
+            f"Solve this math problem step by step. "
+            f"Give your final answer after ####.\n\n"
+            f"Question: {question}\n\nSolution:"
+        )
+        ids = tokenizer(
+            prompt, return_tensors="pt", truncation=True, max_length=512
+        )["input_ids"].to(model.device)
 
         for mode in ["Baseline", "Router"]:
             use_router = (mode == "Router")
             torch.manual_seed(42)
-            out = generate(model, ids, steps=steps, gen_length=gen_length, use_router=use_router, temp=temp)
-            response = tokenizer.decode(out[0, ids.shape[1]:], skip_special_tokens=True).strip()
+            out = generate(model, ids, steps=steps, gen_length=gen_length,
+                           use_router=use_router, temp=temp)
+            response = tokenizer.decode(
+                out[0, ids.shape[1]:], skip_special_tokens=True
+            ).strip()
             pred = extract_answer(response)
 
             is_correct = (pred == gold)
@@ -444,7 +512,8 @@ def eval_gsm8k(model, tokenizer, num_samples=50, steps=256, gen_length=256, temp
 
             if idx < 5:
                 status = "✓" if is_correct else "✗"
-                print(f"  [{mode}] Q{idx+1} {status} | Gold: {gold} | Pred: {pred}")
+                print(f"  [{mode}] Q{idx+1} {status} | "
+                      f"Gold: {gold} | Pred: {pred}")
                 if idx < 2:
                     print(f"    Response: {response[:150]}...")
 
@@ -454,30 +523,38 @@ def eval_gsm8k(model, tokenizer, num_samples=50, steps=256, gen_length=256, temp
                 print(f"  Progress {idx+1}/{num_samples} | {mode}: {acc:.4f}")
 
     for mode in ["Baseline", "Router"]:
-        acc = results[mode]["correct"] / results[mode]["total"] if results[mode]["total"] > 0 else 0
+        t = results[mode]["total"]
+        acc = results[mode]["correct"] / t if t > 0 else 0
         results[mode]["accuracy"] = acc
-        print(f"\n  {mode} GSM8K Accuracy: {acc:.4f} ({results[mode]['correct']}/{results[mode]['total']})")
+        print(f"\n  {mode} GSM8K Accuracy: {acc:.4f} "
+              f"({results[mode]['correct']}/{t})")
 
     return results
 
 
 # ============================================================
-# 9. PLOTTING
+# PLOTTING
 # ============================================================
-def plot_entropy_curve(entropy_results, alpha=0.1, save_path="entropy_curve.png"):
+def plot_entropy_curve(entropy_results, save_path="entropy_curve.png"):
     avg_base = entropy_results["avg_base"]
     avg_router = entropy_results["avg_router"]
     std_base = entropy_results["std_base"]
     std_router = entropy_results["std_router"]
 
     positions = np.arange(len(avg_base))
-    fig, axes = plt.subplots(2, 1, figsize=(14, 10), gridspec_kw={"height_ratios": [3, 1]})
+    fig, axes = plt.subplots(
+        2, 1, figsize=(14, 10), gridspec_kw={"height_ratios": [3, 1]}
+    )
 
     ax1 = axes[0]
-    ax1.plot(positions, avg_base, color="steelblue", linewidth=1.5, label="Baseline", alpha=0.9)
-    ax1.fill_between(positions, avg_base - std_base, avg_base + std_base, color="steelblue", alpha=0.15)
-    ax1.plot(positions, avg_router, color="coral", linewidth=1.5, label=f"Router (α={alpha})", alpha=0.9)
-    ax1.fill_between(positions, avg_router - std_router, avg_router + std_router, color="coral", alpha=0.15)
+    ax1.plot(positions, avg_base, color="steelblue", linewidth=1.5,
+             label="Baseline", alpha=0.9)
+    ax1.fill_between(positions, avg_base - std_base, avg_base + std_base,
+                     color="steelblue", alpha=0.15)
+    ax1.plot(positions, avg_router, color="coral", linewidth=1.5,
+             label="Router (adaptive α)", alpha=0.9)
+    ax1.fill_between(positions, avg_router - std_router,
+                     avg_router + std_router, color="coral", alpha=0.15)
     ax1.set_xlabel("Denoising Step")
     ax1.set_ylabel("Avg Entropy (nats)")
     ax1.set_title("Per-Step Entropy During Denoising: Baseline vs ALA Router")
@@ -504,8 +581,10 @@ def plot_flatness(flatness_results, save_path="flatness.png"):
     x = np.arange(1, 11)
     width = 0.35
 
-    ax.bar(x - width/2, flatness_results["Baseline"]["probs"], width, label="Baseline", color="steelblue", alpha=0.8)
-    ax.bar(x + width/2, flatness_results["Router"]["probs"], width, label="Router", color="coral", alpha=0.8)
+    ax.bar(x - width/2, flatness_results["Baseline"]["probs"], width,
+           label="Baseline", color="steelblue", alpha=0.8)
+    ax.bar(x + width/2, flatness_results["Router"]["probs"], width,
+           label="Router", color="coral", alpha=0.8)
     ax.set_xlabel("Number")
     ax.set_ylabel("Probability")
     ax.set_title("Distribution Flatness: P(number) for 'Choose 1-10'")
@@ -518,16 +597,18 @@ def plot_flatness(flatness_results, save_path="flatness.png"):
     print(f"  Flatness plot saved to {save_path}")
 
 
-def plot_sweep_summary(logic_results, diversity_results, save_path="sweep_summary.png"):
-    """Plots accuracy vs diversity across temperatures."""
+def plot_sweep_summary(logic_results, diversity_results,
+                       save_path="sweep_summary.png"):
+    """Accuracy vs diversity across temperatures."""
     temps = [r["temp"] for r in logic_results]
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
-    # Left: Logical accuracy vs temp
     ax1 = axes[0]
-    ax1.plot(temps, [r["base_acc"] for r in logic_results], 'o-', color="steelblue", label="Baseline", linewidth=2)
-    ax1.plot(temps, [r["router_acc"] for r in logic_results], 's-', color="coral", label="Router", linewidth=2)
+    ax1.plot(temps, [r["base_acc"] for r in logic_results],
+             'o-', color="steelblue", label="Baseline", linewidth=2)
+    ax1.plot(temps, [r["router_acc"] for r in logic_results],
+             's-', color="coral", label="Router", linewidth=2)
     ax1.set_xlabel("Temperature")
     ax1.set_ylabel("Accuracy")
     ax1.set_title("Logical Reasoning Accuracy vs Temperature")
@@ -535,12 +616,13 @@ def plot_sweep_summary(logic_results, diversity_results, save_path="sweep_summar
     ax1.grid(True, alpha=0.3)
     ax1.set_ylim(-0.05, 1.05)
 
-    # Right: Jaccard (diversity) vs temp
     ax2 = axes[1]
     base_jac = [d["Baseline"]["jaccard"] for d in diversity_results]
     router_jac = [d["Router"]["jaccard"] for d in diversity_results]
-    ax2.plot(temps, base_jac, 'o-', color="steelblue", label="Baseline", linewidth=2)
-    ax2.plot(temps, router_jac, 's-', color="coral", label="Router", linewidth=2)
+    ax2.plot(temps, base_jac, 'o-', color="steelblue",
+             label="Baseline", linewidth=2)
+    ax2.plot(temps, router_jac, 's-', color="coral",
+             label="Router", linewidth=2)
     ax2.set_xlabel("Temperature")
     ax2.set_ylabel("Jaccard Similarity (lower = more diverse)")
     ax2.set_title("Generation Diversity vs Temperature")
@@ -551,12 +633,14 @@ def plot_sweep_summary(logic_results, diversity_results, save_path="sweep_summar
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
     print(f"  Sweep summary plot saved to {save_path}")
 
+
 # ============================================================
-# 10. MAIN
+# MAIN
 # ============================================================
 if __name__ == "__main__":
     # --- Load Model ---
     model_id = 'GSAI-ML/LLaDA-8B-Instruct'
+    print("Loading tokenizer and base model...")
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
     base_model = AutoModelForCausalLM.from_pretrained(
         model_id,
@@ -565,79 +649,69 @@ if __name__ == "__main__":
         device_map="auto"
     )
 
-    # Print architecture for verification
-    for name, child in base_model.named_children():
-        print(f"{name:30s} -> {type(child).__name__}")
-    print("\n--- Second level under 'model' ---")
-    for name, child in base_model.model.named_children():
-        print(f"model.{name:30s} -> {type(child).__name__}")
-    print("\n--- Second level under 'model.transformer' ---")
-    for name, child in base_model.model.transformer.named_children():
-        print(f"model.transformer.{name:30s} -> {type(child).__name__}")
-
-    model = ALALLaDA(base_model, alpha=0.1).to(torch.bfloat16)
+    model = ALALLaDA(base_model).to(torch.bfloat16)
     device = next(base_model.parameters()).device
     model.router.to(device)
-    print("Base model type:", type(model.base_model))
-    
-    dummy_ids = tokenizer("Hello", return_tensors="pt")["input_ids"].to(model.device)
-    
-    base_out = model.base_model(dummy_ids)
-    print("Base output type:", type(base_out))
-    print("Has .logits:", hasattr(base_out, 'logits'))
-    
-    router_out = model(dummy_ids)
-    print("Router output type:", type(router_out))
-    print("Has .logits:", hasattr(router_out, 'logits'))
-    
-    if hasattr(base_out, 'logits'):
-        print("Base logits shape:", base_out.logits.shape)
-        print("Router logits shape:", router_out.logits.shape)
-        
-        # Check if manual base_logits matches direct .logits
-        manual = model.base_logits(dummy_ids)
-        direct = base_out.logits
-        print("Manual vs direct max diff:", (manual - direct).abs().max().item())
-    import inspect
-    print(inspect.getsource(type(model.base_model.model).forward))
 
-    print("=" * 60)
     weights_path = "amip_router_best.pt"
     if os.path.exists(weights_path):
-        model.router.load_state_dict(torch.load(weights_path, map_location=device))
+        model.router.load_state_dict(
+            torch.load(weights_path, map_location=device)
+        )
         print(f"Router loaded from {weights_path}")
     else:
         print("WARNING: Using random router weights.")
 
     model.eval()
 
-    # --- Temperature sweep config ---
-    sweep_temps = [0.0, 0.15, 0.3]
+    print(f"\nAlpha schedule: alpha = {ALPHA_BASE} + {ALPHA_SCALE} * p_mask")
+    print(f"  p=0.15 -> alpha={ALPHA_BASE + ALPHA_SCALE*0.15:.4f}")
+    print(f"  p=0.50 -> alpha={ALPHA_BASE + ALPHA_SCALE*0.50:.4f}")
+    print(f"  p=0.95 -> alpha={ALPHA_BASE + ALPHA_SCALE*0.95:.4f}")
 
     # ===========================================================
     # RUN ALL EVALS
     # ===========================================================
     all_results = {}
+    sweep_temps = [0.0, 0.15, 0.3]
 
-    # EVAL 1: Mask Prediction Accuracy (temperature-independent)
-    all_results["mask_accuracy"] = eval_mask_accuracy(model, tokenizer, num_samples=20)
+    # EVAL 1: Single-step mask accuracy
+    all_results["mask_accuracy"] = eval_mask_accuracy(
+        model, tokenizer, num_samples=20
+    )
 
-    # EVAL 2: Logical Reasoning across temperatures
-    logic_results = eval_logical_reasoning(model, tokenizer, temps=sweep_temps)
+    # EVAL 2: Mask accuracy by ratio sweep
+    mask_ratio_results = eval_by_mask_ratio(
+        model, tokenizer, num_samples=50
+    )
+    all_results["mask_accuracy_by_ratio"] = mask_ratio_results
+
+    # EVAL 3: Logical reasoning across temperatures
+    logic_results = eval_logical_reasoning(
+        model, tokenizer, temps=sweep_temps
+    )
     all_results["logical_reasoning"] = logic_results
 
-    # EVAL 3: Diversity across temperatures
-    diversity_results = eval_diversity(model, tokenizer, num_samples=5, temps=sweep_temps)
+    # EVAL 4: Diversity across temperatures
+    diversity_results = eval_diversity(
+        model, tokenizer, num_samples=5, temps=sweep_temps
+    )
     all_results["diversity"] = [
         {
             "temp": d["temp"],
-            "Baseline": {"unique_ratio": d["Baseline"]["unique_ratio"], "jaccard": d["Baseline"]["jaccard"]},
-            "Router": {"unique_ratio": d["Router"]["unique_ratio"], "jaccard": d["Router"]["jaccard"]}
+            "Baseline": {
+                "unique_ratio": d["Baseline"]["unique_ratio"],
+                "jaccard": d["Baseline"]["jaccard"]
+            },
+            "Router": {
+                "unique_ratio": d["Router"]["unique_ratio"],
+                "jaccard": d["Router"]["jaccard"]
+            }
         }
         for d in diversity_results
     ]
 
-    # EVAL 4: Entropy across denoising steps
+    # EVAL 5: Entropy across denoising steps
     entropy_res = eval_entropy_over_steps(model, tokenizer, num_samples=3)
     all_results["entropy"] = {
         "mean_base": float(np.mean(entropy_res["avg_base"])),
@@ -645,22 +719,29 @@ if __name__ == "__main__":
     }
     plot_entropy_curve(entropy_res)
 
-    # EVAL 5: Flatness
+    # EVAL 6: Flatness
     flatness_res = eval_flatness(model, tokenizer)
     all_results["flatness"] = {
-        mode: {"entropy": r["entropy"], "normalized_entropy": r["normalized_entropy"]}
+        mode: {
+            "entropy": r["entropy"],
+            "normalized_entropy": r["normalized_entropy"]
+        }
         for mode, r in flatness_res.items()
     }
     plot_flatness(flatness_res)
 
-    # EVAL 6: GSM8K End-to-End Benchmark
+    # EVAL 7: GSM8K End-to-End Benchmark
     gsm8k_res = eval_gsm8k(model, tokenizer, num_samples=50)
     all_results["gsm8k"] = {
-        mode: {"accuracy": r["accuracy"], "correct": r["correct"], "total": r["total"]}
+        mode: {
+            "accuracy": r["accuracy"],
+            "correct": r["correct"],
+            "total": r["total"]
+        }
         for mode, r in gsm8k_res.items()
     }
 
-    # --- Sweep Summary Plot ---
+    # --- Plots ---
     plot_sweep_summary(logic_results, diversity_results)
 
     # ===========================================================
@@ -668,43 +749,69 @@ if __name__ == "__main__":
     # ===========================================================
     print(f"\n{'='*80}")
     print(f"COMPLETE EVALUATION SUMMARY")
+    print(f"  Alpha schedule: {ALPHA_BASE} + {ALPHA_SCALE} * p_mask")
     print(f"{'='*80}")
 
     # 1. Mask accuracy
     ma = all_results["mask_accuracy"]
     print(f"\n  1. Mask Prediction Accuracy (single-step, p=0.15)")
-    print(f"     Baseline: {ma['base_acc']:.4f}  |  Router: {ma['router_acc']:.4f}  |  Δ: {ma['router_acc']-ma['base_acc']:+.4f}")
+    print(f"     Baseline: {ma['base_acc']:.4f}  |  "
+          f"Router: {ma['router_acc']:.4f}  |  "
+          f"Δ: {ma['router_acc']-ma['base_acc']:+.4f}")
 
-    # 2. Logical reasoning across temps
-    print(f"\n  2. Logical Reasoning Accuracy")
+    # 2. Mask accuracy by ratio
+    print(f"\n  2. Mask Accuracy by Ratio")
+    print(f"     {'p_mask':<8} | {'α':<6} | {'Base Acc':<10} | "
+          f"{'Router Acc':<12} | {'Δ Acc':<10} | {'Δ Conf':<10}")
+    print(f"     {'-'*62}")
+    for r in mask_ratio_results:
+        d_acc = r['router_acc'] - r['base_acc']
+        d_conf = r['router_conf'] - r['base_conf']
+        print(f"     {r['p_mask']:<8.2f} | {r['alpha']:<6.3f} | "
+              f"{r['base_acc']:<10.4f} | {r['router_acc']:<12.4f} | "
+              f"{d_acc:<+10.4f} | {d_conf:<+10.4f}")
+
+    # 3. Logical reasoning across temps
+    print(f"\n  3. Logical Reasoning Accuracy")
     print(f"     {'Temp':<8} | {'Baseline':<10} | {'Router':<10} | {'Δ':<10}")
     print(f"     {'-'*42}")
     for r in logic_results:
         delta = r['router_acc'] - r['base_acc']
-        print(f"     {r['temp']:<8} | {r['base_acc']:<10.4f} | {r['router_acc']:<10.4f} | {delta:<+10.4f}")
+        print(f"     {r['temp']:<8} | {r['base_acc']:<10.4f} | "
+              f"{r['router_acc']:<10.4f} | {delta:<+10.4f}")
 
-    # 3. Diversity across temps
-    print(f"\n  3. Diversity (Jaccard Similarity — lower is more diverse)")
-    print(f"     {'Temp':<8} | {'Base Jaccard':<14} | {'Router Jaccard':<16} | {'Base Unique':<14} | {'Router Unique':<14}")
+    # 4. Diversity across temps
+    print(f"\n  4. Diversity (Jaccard Similarity — lower is more diverse)")
+    print(f"     {'Temp':<8} | {'Base Jaccard':<14} | {'Router Jaccard':<16} "
+          f"| {'Base Unique':<14} | {'Router Unique':<14}")
     print(f"     {'-'*70}")
     for d in all_results["diversity"]:
-        print(f"     {d['temp']:<8} | {d['Baseline']['jaccard']:<14.4f} | {d['Router']['jaccard']:<16.4f} | {d['Baseline']['unique_ratio']:<14.4f} | {d['Router']['unique_ratio']:<14.4f}")
+        print(f"     {d['temp']:<8} | "
+              f"{d['Baseline']['jaccard']:<14.4f} | "
+              f"{d['Router']['jaccard']:<16.4f} | "
+              f"{d['Baseline']['unique_ratio']:<14.4f} | "
+              f"{d['Router']['unique_ratio']:<14.4f}")
 
-    # 4. Entropy
+    # 5. Entropy
     ent = all_results["entropy"]
-    print(f"\n  4. Entropy Across Denoising Steps")
-    print(f"     Mean Base: {ent['mean_base']:.4f}  |  Mean Router: {ent['mean_router']:.4f}  |  Δ: {ent['mean_router']-ent['mean_base']:+.4f}")
+    print(f"\n  5. Entropy Across Denoising Steps")
+    print(f"     Mean Base: {ent['mean_base']:.4f}  |  "
+          f"Mean Router: {ent['mean_router']:.4f}  |  "
+          f"Δ: {ent['mean_router']-ent['mean_base']:+.4f}")
 
-    # 5. Flatness
+    # 6. Flatness
     fl = all_results["flatness"]
-    print(f"\n  5. Distribution Flatness (normalized entropy, 1.0 = uniform)")
-    print(f"     Baseline: {fl['Baseline']['normalized_entropy']:.4f}  |  Router: {fl['Router']['normalized_entropy']:.4f}")
+    print(f"\n  6. Distribution Flatness (normalized entropy, 1.0 = uniform)")
+    print(f"     Baseline: {fl['Baseline']['normalized_entropy']:.4f}  |  "
+          f"Router: {fl['Router']['normalized_entropy']:.4f}")
 
-    # 6. GSM8K
+    # 7. GSM8K
     gs = all_results["gsm8k"]
-    print(f"\n  6. GSM8K End-to-End Accuracy")
-    print(f"     Baseline: {gs['Baseline']['accuracy']:.4f} ({gs['Baseline']['correct']}/{gs['Baseline']['total']})")
-    print(f"     Router:   {gs['Router']['accuracy']:.4f} ({gs['Router']['correct']}/{gs['Router']['total']})")
+    print(f"\n  7. GSM8K End-to-End Accuracy")
+    print(f"     Baseline: {gs['Baseline']['accuracy']:.4f} "
+          f"({gs['Baseline']['correct']}/{gs['Baseline']['total']})")
+    print(f"     Router:   {gs['Router']['accuracy']:.4f} "
+          f"({gs['Router']['correct']}/{gs['Router']['total']})")
 
     print(f"\n{'='*80}")
 
@@ -713,4 +820,4 @@ if __name__ == "__main__":
         json.dump(all_results, f, indent=2, default=str)
     print("Results saved to eval_results.json")
     print("Plots saved: entropy_curve.png, flatness.png, sweep_summary.png")
-
+    print("Stories saved: generated_stories.txt")

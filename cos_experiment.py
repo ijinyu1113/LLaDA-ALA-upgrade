@@ -21,85 +21,8 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from datasets import load_dataset
 import numpy as np
 import matplotlib.pyplot as plt
-import math
 import os
-#
-# ============================================================
-# ARCHITECTURE (must match eval.py exactly)
-# ============================================================
-class AMIPRouter(torch.nn.Module):
-    def __init__(self, d_model=4096, K=8):
-        super().__init__()
-        self.routing_net = torch.nn.Linear(d_model, K)
-        self.experts = torch.nn.ModuleList([
-            torch.nn.Sequential(
-                torch.nn.Linear(d_model * 2, d_model // 4),
-                torch.nn.GELU(),
-                torch.nn.Linear(d_model // 4, d_model)
-            ) for _ in range(K)
-        ])
-
-    def forward(self, h_L, mask_indices, unmasked_indices, range_r=5):
-        delta_h = torch.zeros_like(h_L)
-        bsz, seq_len, d_model = h_L.shape
-
-        for b in range(bsz):
-            m_idx = mask_indices[b]
-            u_idx = unmasked_indices[b]
-            for a in m_idx:
-                adj = [t for t in u_idx if 0 < abs(t - a) <= range_r]
-                if not adj:
-                    continue
-                h_mask = h_L[b, a:a+1, :]
-                pair_deltas = []
-                relevance_scores = []
-                for t in adj:
-                    h_anchor = h_L[b, t:t+1, :]
-                    weights = F.softmax(self.routing_net(h_mask), dim=-1)
-                    conditioned_in = torch.cat([h_anchor, h_mask], dim=-1)
-                    expert_out = sum(
-                        weights[:, i:i+1] * expert(conditioned_in)
-                        for i, expert in enumerate(self.experts)
-                    )
-                    pair_deltas.append(expert_out)
-                    score = (h_anchor * h_mask).sum(dim=-1) / (d_model ** 0.5)
-                    relevance_scores.append(score)
-                scores = torch.cat(relevance_scores, dim=0)
-                combine_weights = F.softmax(scores, dim=0)
-                stacked = torch.cat(pair_deltas, dim=0)
-                weighted_delta = (combine_weights.unsqueeze(-1) * stacked).sum(dim=0)
-                delta_h[b, a, :] = weighted_delta
-
-        return delta_h
-
-
-class ALALLaDA(torch.nn.Module):
-    def __init__(self, base_model, alpha=0.1):
-        super().__init__()
-        self.base_model = base_model
-        self.router = AMIPRouter()
-        self.alpha = alpha
-
-    @property
-    def device(self):
-        return next(self.base_model.parameters()).device
-
-    def forward(self, input_ids, attention_mask=None):
-        outputs = self.base_model(
-            input_ids, attention_mask=attention_mask, output_hidden_states=True
-        )
-        h_L = outputs.hidden_states[-1].to(torch.bfloat16)
-        m_idx = [torch.where(row == 126336)[0].tolist() for row in input_ids]
-        u_idx = [torch.where(row != 126336)[0].tolist() for row in input_ids]
-        delta = self.router(h_L, m_idx, u_idx)
-        blended_h = (1 - self.alpha) * h_L + self.alpha * delta
-        logits = self.base_model.model.transformer.ff_out(blended_h)
-        if self.base_model.model.config.scale_logits:
-            logits = logits * (1 / math.sqrt(self.base_model.model.config.d_model))
-        return type('Obj', (object,), {'logits': logits})()
-
-    def base_logits(self, input_ids):
-        return self.base_model(input_ids).logits
+from models import AMIPRouterInference, ALALLaDA, ALPHA_BASE, ALPHA_SCALE, MASK_TOKEN_ID
 
 
 # ============================================================
@@ -130,7 +53,7 @@ def get_base_and_router_hidden_states(model, input_ids, alpha=0.1):
       h_router: router-corrected hidden states at masked positions [N_masked, d_model]
       all_layer_hidden_states: list of [N_masked, d_model] per layer (base only)
     """
-    mask_token_id = 126336
+    mask_token_id = MASK_TOKEN_ID
     outputs = model.base_model(input_ids, output_hidden_states=True)
 
     # All layers: outputs.hidden_states is a tuple of (n_layers+1) tensors
@@ -145,8 +68,8 @@ def get_base_and_router_hidden_states(model, input_ids, alpha=0.1):
 
     # Router correction
     h_L = all_hidden[-1].to(torch.bfloat16)
-    m_idx_list = [mask_pos.tolist()]
-    u_idx_list = [(input_ids[0] != mask_token_id).nonzero(as_tuple=True)[0].tolist()]
+    m_idx_list = [mask_pos]
+    u_idx_list = [(input_ids[0] != mask_token_id).nonzero(as_tuple=True)[0]]
     delta = model.router(h_L, m_idx_list, u_idx_list)
     h_blended = (1 - alpha) * h_L + alpha * delta
     h_router = h_blended[0, mask_pos, :].to(torch.float32)  # [N_masked, d_model]
@@ -182,9 +105,9 @@ def experiment_cosine_by_mask_ratio(model, tokenizer,
     texts = [t for t in dataset["text"][:500] if len(t) > 80][:num_samples]
 
     base_sims, router_sims = [], []
-
     for p_mask in mask_ratios:
         batch_base, batch_router = [], []
+        alpha = ALPHA_BASE + ALPHA_SCALE * p_mask
 
         for text in texts:
             enc = tokenizer(text, return_tensors="pt",
@@ -196,12 +119,12 @@ def experiment_cosine_by_mask_ratio(model, tokenizer,
             prob[:, 0] = 0.0
             masked = ids.clone()
             mask_locs = torch.bernoulli(prob).bool()
-            masked[mask_locs] = 126336
+            masked[mask_locs] = MASK_TOKEN_ID
 
             if mask_locs.sum() < 2:
                 continue
 
-            h_base, h_router, _ = get_base_and_router_hidden_states(model, masked)
+            h_base, h_router, _ = get_base_and_router_hidden_states(model, masked, alpha=alpha)
             if h_base is None:
                 continue
 
@@ -255,12 +178,13 @@ def experiment_cosine_by_layer(model, tokenizer,
         prob[:, 0] = 0.0
         masked = ids.clone()
         mask_locs = torch.bernoulli(prob).bool()
-        masked[mask_locs] = 126336
+        masked[mask_locs] = MASK_TOKEN_ID
 
         if mask_locs.sum() < 2:
             continue
 
-        h_base, h_router, layer_states = get_base_and_router_hidden_states(model, masked)
+        alpha = ALPHA_BASE + ALPHA_SCALE * p_mask
+        h_base, h_router, layer_states = get_base_and_router_hidden_states(model, masked, alpha=alpha)
         if h_base is None or layer_states is None:
             continue
 
@@ -404,7 +328,7 @@ if __name__ == "__main__":
         torch_dtype=torch.bfloat16,
         device_map="auto"
     )
-    model = ALALLaDA(base_model, alpha=0.1).to(torch.bfloat16)
+    model = ALALLaDA(base_model).to(torch.bfloat16)
     device = next(base_model.parameters()).device
     model.router.to(device)
 

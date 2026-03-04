@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
+from models import MASK_TOKEN_ID
 
 # ============================================================
 # 2. GENERATION UTILS
@@ -24,9 +25,13 @@ def get_num_transfer_tokens(mask_index, steps):
 @torch.no_grad()
 def generate(model, prompt_ids, steps=128, gen_length=128, block_length=32, use_router=True, temp=0.0):
 
-    """Full LLaDA generation with block-wise confidence-based unmasking."""
-    torch.manual_seed(42)
-    device, mask_id = model.device, 126336
+    """Full LLaDA generation with block-wise confidence-based unmasking.
+
+    NOTE: Caller must seed (torch.manual_seed) before calling.
+    The seed was removed from here so that eval_diversity can
+    produce varied outputs with different seeds per sample.
+    """
+    device, mask_id = model.device, MASK_TOKEN_ID
     x = torch.full((prompt_ids.shape[0], prompt_ids.shape[1] + gen_length), mask_id, dtype=torch.long).to(device)
     x[:, :prompt_ids.shape[1]] = prompt_ids.clone()
 
@@ -42,7 +47,10 @@ def generate(model, prompt_ids, steps=128, gen_length=128, block_length=32, use_
 
         for i in range(steps_per_block):
             mask_index = (x == mask_id)
-            logits = model(x).logits if use_router else model.base_logits(x)
+            # Pass prompt_length so forward computes p_mask over
+            # generation region only (prompt tokens are never masked)
+            logits = (model(x, prompt_length=prompt_ids.shape[1]).logits
+                      if use_router else model.base_logits(x))
             #logits[:, :, 126081] = -torch.inf
 
             logits_noise = add_gumbel_noise(logits, temperature=temp)

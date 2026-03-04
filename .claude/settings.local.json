@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from models import AMIPRouterTrain, AMIPRouterInference, ALALLaDA, ALPHA_BASE, ALPHA_SCALE, MASK_TOKEN_ID; print\\(f''ALPHA_BASE={ALPHA_BASE}, ALPHA_SCALE={ALPHA_SCALE}, MASK_TOKEN_ID={MASK_TOKEN_ID}''\\); print\\(f''AMIPRouterTrain: {AMIPRouterTrain}''\\); print\\(f''AMIPRouterInference: {AMIPRouterInference}''\\); print\\(f''ALALLaDA: {ALALLaDA}''\\)\")",
+      "Bash(python -c \":*)"
+    ]
+  }
+}
