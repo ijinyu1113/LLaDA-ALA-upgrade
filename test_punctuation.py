@@ -42,9 +42,13 @@ print("=" * 60)
 for mode in ["Baseline", "Router (flat alpha=0.1)"]:
     use_router = (mode != "Baseline")
     print(f"\n--- {mode} ---")
-    for s in range(3):
-        torch.manual_seed(42 + s)
-        out = generate(model, ids, steps=64, gen_length=64,
-                       use_router=use_router, temp=0.0)
-        text = tokenizer.decode(out[0, ids.shape[1]:], skip_special_tokens=True).strip()
-        print(f"  [{s+1}]: {text}")
+    torch.manual_seed(42)
+    out = generate(model, ids, steps=64, gen_length=64,
+                   use_router=use_router, temp=0.0)
+    gen_ids = out[0, ids.shape[1]:]
+    text = tokenizer.decode(gen_ids, skip_special_tokens=True).strip()
+    print(f"  Text: {text}")
+    print(f"  Token IDs: {gen_ids.tolist()}")
+    # Show each token individually to see spaces
+    tokens = [tokenizer.decode([tid]) for tid in gen_ids.tolist()]
+    print(f"  Tokens:    {tokens}")

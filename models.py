@@ -26,6 +26,7 @@ MASK_TOKEN_ID = 126336
 
 def _make_experts(d_model, K):
     """Expert architecture shared by both router variants."""
+    # cat(h_anchor, h_mask)
     return nn.ModuleList([
         nn.Sequential(
             nn.Linear(d_model * 2, d_model // 4),
