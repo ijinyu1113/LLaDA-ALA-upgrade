@@ -541,7 +541,11 @@ def eval_math(model, tokenizer, num_samples=50,
     print(f"EVAL 8: MATH End-to-End Accuracy (n={num_samples})")
     print(f"{'='*60}")
 
-    dataset = load_dataset("hendrycks/competition_math", split="test", trust_remote_code=True)
+    math_subjects = ["algebra", "counting_and_probability", "geometry",
+                     "intermediate_algebra", "number_theory", "prealgebra", "precalculus"]
+    from datasets import concatenate_datasets
+    math_parts = [load_dataset("EleutherAI/hendrycks_math", subj, split="test") for subj in math_subjects]
+    dataset = concatenate_datasets(math_parts)
     samples = list(dataset.select(range(min(num_samples, len(dataset)))))
 
     def extract_boxed(text):

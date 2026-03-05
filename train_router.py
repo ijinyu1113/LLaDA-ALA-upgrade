@@ -184,8 +184,11 @@ def train():
     gsm8k = gsm8k.remove_columns([c for c in gsm8k.column_names if c != "text"])
     print(f"  GSM8K train: {len(gsm8k)}")
 
-    # MATH train split
-    math_ds = load_dataset("hendrycks/competition_math", split="train", trust_remote_code=True)
+    # MATH train split (load all subjects from EleutherAI mirror)
+    math_subjects = ["algebra", "counting_and_probability", "geometry",
+                     "intermediate_algebra", "number_theory", "prealgebra", "precalculus"]
+    math_parts = [load_dataset("EleutherAI/hendrycks_math", subj, split="train") for subj in math_subjects]
+    math_ds = concatenate_datasets(math_parts)
     math_ds = math_ds.map(lambda x: {"text": f"Problem: {x['problem']}\nSolution: {x['solution']}"})
     math_ds = math_ds.remove_columns([c for c in math_ds.column_names if c != "text"])
     print(f"  MATH train: {len(math_ds)}")
