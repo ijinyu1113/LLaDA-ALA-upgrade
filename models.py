@@ -20,7 +20,7 @@ import math
 # SHARED CONSTANTS
 # ============================================================
 ALPHA_BASE = 0.05
-ALPHA_SCALE = 0.25
+ALPHA_SCALE = 0.15
 MASK_TOKEN_ID = 126336
 
 
