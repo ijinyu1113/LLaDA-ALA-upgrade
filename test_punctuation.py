@@ -17,7 +17,7 @@ model = ALALLaDA(base_model).to(torch.bfloat16)
 device = next(base_model.parameters()).device
 model.router.to(device)
 
-weights_path = "amip_router_final.pt"
+weights_path = "amip_router_best.pt"
 if os.path.exists(weights_path):
     model.router.load_state_dict(torch.load(weights_path, map_location=device))
     print(f"Router loaded from {weights_path}")

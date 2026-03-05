@@ -398,7 +398,7 @@ if __name__ == "__main__":
     device = next(base_model.parameters()).device
     model.router.to(device)
 
-    weights_path = "amip_router_final.pt"
+    weights_path = "amip_router_best.pt"
     if os.path.exists(weights_path):
         model.router.load_state_dict(
             torch.load(weights_path, map_location=device)

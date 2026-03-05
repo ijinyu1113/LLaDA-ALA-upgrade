@@ -221,7 +221,7 @@ def train():
     best_val_loss = float('inf')
     log_interval = 200
     val_interval = 1000
-    max_steps = 50000     # Adjust based on your time budget
+    max_steps = 30000     # Adjust based on your time budget
     
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
     optimizer, 
