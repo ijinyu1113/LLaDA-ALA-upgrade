@@ -19,8 +19,8 @@ import math
 # ============================================================
 # SHARED CONSTANTS
 # ============================================================
-ALPHA_BASE = 0.05
-ALPHA_SCALE = 0.15
+ALPHA_BASE = 0.1
+ALPHA_SCALE = 0.0  # flat alpha — adaptive schedule hurt generation quality
 MASK_TOKEN_ID = 126336
 
 

@@ -18,7 +18,9 @@ export MKL_NUM_THREADS=16
 export NUMEXPR_NUM_THREADS=16
 export VECLIB_MAXIMUM_THREADS=16
 export TOKENIZERS_PARALLELISM=false
+
 export TORCHDYNAMO_DISABLE=1
+
 export CUDA_DEVICE_ORDER=PCI_BUS_ID
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export CUDA_LAUNCH_BLOCKING=0
@@ -42,4 +44,4 @@ print(f'BF16: {torch.cuda.is_bf16_supported()}')
 "
 echo "========================================="
 
-time srun python3 /u/iyu1/nim_game_project/llada/cos_experiment.py
+time srun python3 /u/iyu1/nim_game_project/llada/train_router.py
