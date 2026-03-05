@@ -1,8 +1,6 @@
 """
 Unified ALA Evaluation Script
 ==============================
-Merged from test_router.py + test_mask_ratio.py.
-
 Runs all evaluations in one script:
   1. Single-step mask prediction accuracy
   2. Mask accuracy & confidence sweep by mask ratio
@@ -11,11 +9,11 @@ Runs all evaluations in one script:
   5. Entropy across denoising steps
   6. Distribution flatness
   7. GSM8K end-to-end benchmark
+  8. MATH end-to-end benchmark
 
-Alpha schedule: alpha = 0.05 + 0.25 * p_mask  (matching train_router.py)
-  - Single-step evals: alpha computed from the known p_mask
-  - Generation evals:  alpha auto-computed in forward() from the current
-    mask ratio of input_ids at each denoising step — no extra code needed
+Alpha: flat 0.1 (ALPHA_BASE=0.1, ALPHA_SCALE=0.0)
+Residual blending: h + alpha * delta (not interpolation)
+Learned Q/K attention aggregation, range_r=10
 """
 
 import torch
@@ -533,6 +531,101 @@ def eval_gsm8k(model, tokenizer, num_samples=50,
 
 
 # ============================================================
+# EVAL 8: MATH End-to-End Benchmark
+# ============================================================
+@torch.no_grad()
+def eval_math(model, tokenizer, num_samples=50,
+              steps=256, gen_length=256, temp=0.0):
+    """End-to-end accuracy on MATH (competition math) test set."""
+    print(f"\n{'='*60}")
+    print(f"EVAL 8: MATH End-to-End Accuracy (n={num_samples})")
+    print(f"{'='*60}")
+
+    dataset = load_dataset("hendrycks/competition_math", split="test", trust_remote_code=True)
+    samples = list(dataset.select(range(min(num_samples, len(dataset)))))
+
+    def extract_boxed(text):
+        """Extract answer from \\boxed{...} format used in MATH."""
+        # Find the last \boxed{...}
+        idx = text.rfind("\\boxed{")
+        if idx == -1:
+            # Try without backslash (model might not produce it)
+            idx = text.rfind("boxed{")
+            if idx == -1:
+                return text.strip().split()[-1] if text.strip() else ""
+            idx += 6
+        else:
+            idx += 7
+        # Find matching closing brace
+        depth = 1
+        end = idx
+        while end < len(text) and depth > 0:
+            if text[end] == '{':
+                depth += 1
+            elif text[end] == '}':
+                depth -= 1
+            end += 1
+        return text[idx:end-1].strip() if depth == 0 else ""
+
+    results = {
+        "Baseline": {"correct": 0, "total": 0},
+        "Router": {"correct": 0, "total": 0}
+    }
+
+    for idx, sample in enumerate(samples):
+        problem = sample["problem"]
+        gold = extract_boxed(sample["solution"])
+        if not gold:
+            continue
+
+        prompt = (
+            f"Solve this math problem. Put your final answer in \\boxed{{}}.\n\n"
+            f"Problem: {problem}\n\nSolution:"
+        )
+        ids = tokenizer(
+            prompt, return_tensors="pt", truncation=True, max_length=512
+        )["input_ids"].to(model.device)
+
+        for mode in ["Baseline", "Router"]:
+            use_router = (mode == "Router")
+            torch.manual_seed(42)
+            out = generate(model, ids, steps=steps, gen_length=gen_length,
+                           use_router=use_router, temp=temp)
+            response = tokenizer.decode(
+                out[0, ids.shape[1]:], skip_special_tokens=True
+            ).strip()
+            pred = extract_boxed(response)
+
+            # Normalize for comparison (strip whitespace, remove trailing periods)
+            pred_norm = pred.strip().rstrip('.')
+            gold_norm = gold.strip().rstrip('.')
+            is_correct = (pred_norm == gold_norm)
+            results[mode]["correct"] += int(is_correct)
+            results[mode]["total"] += 1
+
+            if idx < 3:
+                status = "✓" if is_correct else "✗"
+                print(f"  [{mode}] Q{idx+1} {status} | "
+                      f"Gold: {gold} | Pred: {pred}")
+                if idx < 2:
+                    print(f"    Response: {response[:150]}...")
+
+        if (idx + 1) % 10 == 0:
+            for mode in ["Baseline", "Router"]:
+                acc = results[mode]["correct"] / results[mode]["total"]
+                print(f"  Progress {idx+1}/{num_samples} | {mode}: {acc:.4f}")
+
+    for mode in ["Baseline", "Router"]:
+        t = results[mode]["total"]
+        acc = results[mode]["correct"] / t if t > 0 else 0
+        results[mode]["accuracy"] = acc
+        print(f"\n  {mode} MATH Accuracy: {acc:.4f} "
+              f"({results[mode]['correct']}/{t})")
+
+    return results
+
+
+# ============================================================
 # PLOTTING
 # ============================================================
 def plot_entropy_curve(entropy_results, save_path="entropy_curve.png"):
@@ -731,7 +824,7 @@ if __name__ == "__main__":
     plot_flatness(flatness_res)
 
     # EVAL 7: GSM8K End-to-End Benchmark
-    gsm8k_res = eval_gsm8k(model, tokenizer, num_samples=50)
+    gsm8k_res = eval_gsm8k(model, tokenizer, num_samples=100)
     all_results["gsm8k"] = {
         mode: {
             "accuracy": r["accuracy"],
@@ -739,6 +832,17 @@ if __name__ == "__main__":
             "total": r["total"]
         }
         for mode, r in gsm8k_res.items()
+    }
+
+    # EVAL 8: MATH End-to-End Benchmark
+    math_res = eval_math(model, tokenizer, num_samples=50)
+    all_results["math"] = {
+        mode: {
+            "accuracy": r["accuracy"],
+            "correct": r["correct"],
+            "total": r["total"]
+        }
+        for mode, r in math_res.items()
     }
 
     # --- Plots ---
@@ -812,6 +916,14 @@ if __name__ == "__main__":
           f"({gs['Baseline']['correct']}/{gs['Baseline']['total']})")
     print(f"     Router:   {gs['Router']['accuracy']:.4f} "
           f"({gs['Router']['correct']}/{gs['Router']['total']})")
+
+    # 8. MATH
+    mt = all_results["math"]
+    print(f"\n  8. MATH End-to-End Accuracy")
+    print(f"     Baseline: {mt['Baseline']['accuracy']:.4f} "
+          f"({mt['Baseline']['correct']}/{mt['Baseline']['total']})")
+    print(f"     Router:   {mt['Router']['accuracy']:.4f} "
+          f"({mt['Router']['correct']}/{mt['Router']['total']})")
 
     print(f"\n{'='*80}")
 

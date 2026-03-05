@@ -6,7 +6,7 @@ Shared architecture for training and inference.
 Two router variants:
   - AMIPRouterTrain:     forward(h_anchor, h_mask) — pre-paired [N, d] inputs
   - AMIPRouterInference: forward(h_L, mask_indices, unmasked_indices) — full
-                         sequence [B, L, d] with attention-weighted aggregation
+                         sequence [B, L, d] with learned attention aggregation
 
 Alpha schedule: alpha = ALPHA_BASE + ALPHA_SCALE * p_mask
 """
@@ -22,18 +22,26 @@ import math
 ALPHA_BASE = 0.1
 ALPHA_SCALE = 0.0  # flat alpha — adaptive schedule hurt generation quality
 MASK_TOKEN_ID = 126336
+RANGE_R = 10  # how far to look for unmasked anchors
 
 
 def _make_experts(d_model, K):
-    """Expert architecture shared by both router variants."""
-    # cat(h_anchor, h_mask)
-    return nn.ModuleList([
-        nn.Sequential(
-            nn.Linear(d_model * 2, d_model // 4),
+    """Expert architecture shared by both router variants.
+
+    Bottleneck: 2d -> d/2 -> d (wider than d/4 to preserve fine-grained token distinctions).
+    Last layer zero-init so router starts as identity (no correction).
+    """
+    experts = nn.ModuleList()
+    for _ in range(K):
+        layers = nn.Sequential(
+            nn.Linear(d_model * 2, d_model // 2),
             nn.GELU(),
-            nn.Linear(d_model // 4, d_model),
-        ) for _ in range(K)
-    ])
+            nn.Linear(d_model // 2, d_model),
+        )
+        nn.init.zeros_(layers[2].weight)
+        nn.init.zeros_(layers[2].bias)
+        experts.append(layers)
+    return experts
 
 
 # ============================================================
@@ -42,19 +50,22 @@ def _make_experts(d_model, K):
 class AMIPRouterTrain(nn.Module):
     """Router for training: takes pre-paired (anchor, mask) vectors.
 
-    Training creates explicit (mask, unmasked_anchor) pairs via vectorized
-    pair finding, so forward receives pre-paired [N, d] tensors directly.
+    Each pair gets a learned relevance gate (sigmoid of q·k) that scales
+    the MoE delta — irrelevant anchors produce near-zero corrections.
 
     Args:
         h_anchor: [N, d_model] hidden states at unmasked anchor positions
         h_mask:   [N, d_model] hidden states at masked positions
     Returns:
-        [N, d_model] delta corrections
+        [N, d_model] relevance-gated delta corrections
     """
     def __init__(self, d_model=4096, K=8):
         super().__init__()
+        self.d_proj = d_model // 8
         self.routing_net = nn.Linear(d_model, K)
         self.experts = _make_experts(d_model, K)
+        self.q_proj = nn.Linear(d_model, self.d_proj)
+        self.k_proj = nn.Linear(d_model, self.d_proj)
 
     def forward(self, h_anchor, h_mask):
         weights = F.softmax(self.routing_net(h_mask), dim=-1)       # [N, K]
@@ -63,7 +74,15 @@ class AMIPRouterTrain(nn.Module):
             [e(conditioned) for e in self.experts], dim=0
         )                                                            # [K, N, d]
         weighted = expert_out * weights.t().unsqueeze(-1)            # [K, N, d]
-        return weighted.sum(dim=0)                                   # [N, d]
+        delta = weighted.sum(dim=0)                                  # [N, d]
+
+        # Learned relevance gate
+        q = self.q_proj(h_mask)                                      # [N, d_proj]
+        k = self.k_proj(h_anchor)                                    # [N, d_proj]
+        relevance = torch.sigmoid(
+            (q * k).sum(dim=-1, keepdim=True) / (self.d_proj ** 0.5)
+        )                                                            # [N, 1]
+        return delta * relevance
 
 
 # ============================================================
@@ -73,23 +92,26 @@ class AMIPRouterInference(nn.Module):
     """Router for inference: one mask token can have multiple unmasked anchors.
 
     For each masked position, finds adjacent unmasked tokens within range_r,
-    computes per-pair delta via MoE, then combines via scaled dot-product
-    similarity weights (attention-like relevance aggregation).
+    computes per-pair delta via MoE, then combines via learned Q/K attention
+    weights (trained relevance, not raw dot product).
 
     Args:
         h_L:             [B, L, d_model] last-layer hidden states
-        mask_indices:    list of B tensors, each [N_mask_b] (positions of mask tokens)
+        mask_indices:    list of B tensors, each [N_mask_b]
         unmasked_indices: list of B tensors, each [N_unmask_b]
-        range_r:         max distance to look for anchors (default 5)
+        range_r:         max distance to look for anchors (default RANGE_R)
     Returns:
         [B, L, d_model] delta corrections (zero at non-masked positions)
     """
     def __init__(self, d_model=4096, K=8):
         super().__init__()
+        self.d_proj = d_model // 8
         self.routing_net = nn.Linear(d_model, K)
         self.experts = _make_experts(d_model, K)
+        self.q_proj = nn.Linear(d_model, self.d_proj)
+        self.k_proj = nn.Linear(d_model, self.d_proj)
 
-    def forward(self, h_L, mask_indices, unmasked_indices, range_r=5):
+    def forward(self, h_L, mask_indices, unmasked_indices, range_r=RANGE_R):
         delta_h = torch.zeros_like(h_L)
         bsz, seq_len, d_model = h_L.shape
 
@@ -117,8 +139,10 @@ class AMIPRouterInference(nn.Module):
                     for i, expert in enumerate(self.experts)
                 )                                                       # [N, d]
 
-                # Attention-weighted aggregation across anchors
-                scores = (h_anchors * h_mask).sum(dim=-1) / (d_model ** 0.5)
+                # Learned attention aggregation across anchors
+                q = self.q_proj(h_mask)                                 # [1, d_proj]
+                k = self.k_proj(h_anchors)                              # [N, d_proj]
+                scores = (q * k).sum(dim=-1) / (self.d_proj ** 0.5)    # [N]
                 combine_w = F.softmax(scores, dim=0)                    # [N]
                 delta_h[b, a] = (combine_w.unsqueeze(-1) * pair_deltas).sum(0)
 
@@ -160,7 +184,7 @@ class ALALLaDA(nn.Module):
             p_mask = (gen_region == MASK_TOKEN_ID).float().mean().item()
             alpha = ALPHA_BASE + ALPHA_SCALE * p_mask
 
-        blended = (1 - alpha) * h_L + alpha * delta
+        blended = h_L + alpha * delta
         logits = self.base_model.model.transformer.ff_out(blended)
         if self.base_model.model.config.scale_logits:
             logits *= 1.0 / math.sqrt(self.base_model.model.config.d_model)
