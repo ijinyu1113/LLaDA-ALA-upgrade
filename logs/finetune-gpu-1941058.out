@@ -1,0 +1,30 @@
+=========================================
+JOB 1941058 on gh071.hsn.cm.delta.internal.ncsa.edu
+NVIDIA GH200 120GB, 97871 MiB, 550.163.01
+PyTorch 2.5.1
+Transformers 4.36.2
+CUDA 12.4
+GPU: NVIDIA GH200 120GB
+BF16 supported? True
+=========================================
+Loading model...
+Router loaded from amip_router_best.pt
+
+Prompt: Write a short story about a cat who finds a magical portal in a library.
+============================================================
+
+--- Baseline ---
+  [1]: Once upon a time, there was a cat named Whiskers who loved to explore the library. One day, while wandering through the shelves, he stumbled upon a magical portal.
+  [2]: Once upon a time, there was a cat named Whiskers who loved to explore the library. One day, while wandering through the shelves, he stumbled upon a magical portal.
+  [3]: Once upon a time, there was a cat named Whiskers who loved to explore the library. One day, while wandering through the shelves, he stumbled upon a magical portal.
+
+--- Router (flat alpha=0.1) ---
+  [1]: A cat named Whiskers was exploring the library when he stumbled upon a magical portal in the middle of the room. Curious and excited, Whiskers stepped through the portal and found himself in a magical world filled with strange creatures and enchanted objects. 
+ / 
+ /
+  [2]: A cat named Whiskers was exploring the library when he stumbled upon a magical portal in the middle of the room. Curious and excited, Whiskers stepped through the portal and found himself in a magical world filled with strange creatures and enchanted objects. 
+ / 
+ /
+  [3]: A cat named Whiskers was exploring the library when he stumbled upon a magical portal in the middle of the room. Curious and excited, Whiskers stepped through the portal and found himself in a magical world filled with strange creatures and enchanted objects. 
+ / 
+ /

@@ -1,0 +1,20 @@
+Lmod has detected the following error: These module(s) or extension(s) exist
+but cannot be loaded as requested: "gcc"
+   Try: "module spider gcc" to see how to load the module(s).
+
+
+
+/var/spool/slurmd/job1941043/slurm_script: line 29: conda: command not found
+/var/spool/slurmd/job1941043/slurm_script: line 29: /etc/profile.d/conda.sh: No such file or directory
+/var/spool/slurmd/job1941043/slurm_script: line 30: conda: command not found
+/var/spool/slurmd/job1941043/slurm_script: line 35: python: command not found
+gpu-bind: usable_gres=0x1; bit_alloc=0x8; local_inx=1; global_list=3; local_list=0
+Traceback (most recent call last):
+  File "/u/iyu1/nim_game_project/llada/test_router.py", line 21, in <module>
+    import torch
+ModuleNotFoundError: No module named 'torch'
+srun: error: gh071: task 0: Exited with exit code 1
+
+real	0m0.081s
+user	0m0.013s
+sys	0m0.000s

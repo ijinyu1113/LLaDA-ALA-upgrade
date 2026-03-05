@@ -1,0 +1,49 @@
+Using CC = cc 
+Using CXX = CC 
+Using FC = ftn 
+Using F77 = ftn 
+Using F90 = ftn 
+Lmod has detected the following error: These module(s) or extension(s) exist
+but cannot be loaded as requested: "gcc"
+   Try: "module spider gcc" to see how to load the module(s).
+
+
+
+/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/transformers/utils/generic.py:441: FutureWarning: `torch.utils._pytree._register_pytree_node` is deprecated. Please use `torch.utils._pytree.register_pytree_node` instead.
+  _torch_pytree._register_pytree_node(
+gpu-bind: usable_gres=0x1; bit_alloc=0x2; local_inx=1; global_list=1; local_list=0
+/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/transformers/utils/generic.py:441: FutureWarning: `torch.utils._pytree._register_pytree_node` is deprecated. Please use `torch.utils._pytree.register_pytree_node` instead.
+  _torch_pytree._register_pytree_node(
+/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/huggingface_hub/file_download.py:943: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+  warnings.warn(
+Special tokens have been added in the vocabulary, make sure the associated word embeddings are fine-tuned or trained.
+/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/transformers/utils/generic.py:309: FutureWarning: `torch.utils._pytree._register_pytree_node` is deprecated. Please use `torch.utils._pytree.register_pytree_node` instead.
+  _torch_pytree._register_pytree_node(
+/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/transformers/utils/generic.py:309: FutureWarning: `torch.utils._pytree._register_pytree_node` is deprecated. Please use `torch.utils._pytree.register_pytree_node` instead.
+  _torch_pytree._register_pytree_node(
+The model weights are not tied. Please use the `tie_weights` method before using the `infer_auto_device` function.
+Loading checkpoint shards:   0%|          | 0/6 [00:00<?, ?it/s]Loading checkpoint shards:  17%|█▋        | 1/6 [00:01<00:09,  1.90s/it]Loading checkpoint shards:  33%|███▎      | 2/6 [00:04<00:08,  2.17s/it]Loading checkpoint shards:  50%|█████     | 3/6 [00:06<00:07,  2.43s/it]Loading checkpoint shards:  67%|██████▋   | 4/6 [00:09<00:04,  2.47s/it]Loading checkpoint shards:  83%|████████▎ | 5/6 [00:12<00:02,  2.66s/it]Loading checkpoint shards: 100%|██████████| 6/6 [00:14<00:00,  2.48s/it]Loading checkpoint shards: 100%|██████████| 6/6 [00:14<00:00,  2.44s/it]
+/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/huggingface_hub/file_download.py:943: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+  warnings.warn(
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'hendrycks/competition_math' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+Traceback (most recent call last):
+  File "/u/iyu1/nim_game_project/llada/train_router.py", line 366, in <module>
+    train()
+  File "/u/iyu1/nim_game_project/llada/train_router.py", line 188, in train
+    math_ds = load_dataset("hendrycks/competition_math", split="train", trust_remote_code=True)
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/datasets/load.py", line 1397, in load_dataset
+    builder_instance = load_dataset_builder(
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/datasets/load.py", line 1137, in load_dataset_builder
+    dataset_module = dataset_module_factory(
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/datasets/load.py", line 1030, in dataset_module_factory
+    raise e1 from None
+  File "/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/datasets/load.py", line 985, in dataset_module_factory
+    raise DatasetNotFoundError(f"Dataset '{path}' doesn't exist on the Hub or cannot be accessed.") from e
+datasets.exceptions.DatasetNotFoundError: Dataset 'hendrycks/competition_math' doesn't exist on the Hub or cannot be accessed.
+srun: error: gh099: task 0: Exited with exit code 1
+
+real	0m31.694s
+user	0m0.013s
+sys	0m0.004s

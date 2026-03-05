@@ -1,0 +1,24 @@
+=========================================
+JOB 1942651 on gh092.hsn.cm.delta.internal.ncsa.edu
+NVIDIA GH200 120GB, 97871 MiB, 570.172.08
+PyTorch 2.5.1
+Transformers 4.36.2
+CUDA 12.4
+GPU: NVIDIA GH200 120GB
+BF16 supported? True
+=========================================
+Loading model...
+Router loaded from amip_router_best.pt
+
+Prompt: Write a short story about a cat who finds a magical portal in a library.
+============================================================
+
+--- Baseline ---
+  Text: Once upon a time, there was a cat named Whiskers who loved to explore the library. One day, while wandering through the shelves, he stumbled upon a magical portal.
+  Token IDs: [198, 11456, 4450, 259, 898, 11, 947, 529, 259, 7748, 7508, 2219, 3223, 427, 901, 7916, 297, 9070, 268, 8296, 13, 3912, 1813, 11, 1816, 57292, 1352, 268, 33379, 11, 464, 49056, 4450, 259, 25596, 24327, 13, 126348, 126081, 126081, 126081, 126081, 126081, 126081, 126081, 126081, 126081, 126081, 126081, 126081, 126081, 126081, 126081, 126081, 126081, 126081, 126081, 126081, 126081, 126081, 126081, 126081, 126081, 126081]
+  Tokens:    ['\n', 'Once', ' upon', ' a', ' time', ',', ' there', ' was', ' a', ' cat', ' named', ' Wh', 'isk', 'ers', ' who', ' loved', ' to', ' explore', ' the', ' library', '.', ' One', ' day', ',', ' while', ' wandering', ' through', ' the', ' shelves', ',', ' he', ' stumbled', ' upon', ' a', ' magical', ' portal', '.', '<|eot_id|>', '<|endoftext|>', '<|endoftext|>', '<|endoftext|>', '<|endoftext|>', '<|endoftext|>', '<|endoftext|>', '<|endoftext|>', '<|endoftext|>', '<|endoftext|>', '<|endoftext|>', '<|endoftext|>', '<|endoftext|>', '<|endoftext|>', '<|endoftext|>', '<|endoftext|>', '<|endoftext|>', '<|endoftext|>', '<|endoftext|>', '<|endoftext|>', '<|endoftext|>', '<|endoftext|>', '<|endoftext|>', '<|endoftext|>', '<|endoftext|>', '<|endoftext|>', '<|endoftext|>']
+
+--- Router (flat alpha=0.1) ---
+  Text: One day , a cat named Whiskers was exploring an old library when he stumbled upon a magical portal . The portal was covered in runes and symbols , and it was glowing with an eerie light . Whiskers was intrigued and stepped through the portal , finding himself in a strange new world .
+  Token IDs: [198, 5146, 1813, 2347, 259, 7748, 7508, 2219, 3223, 427, 529, 19166, 289, 2622, 8296, 950, 464, 49056, 4450, 259, 25596, 24327, 1250, 468, 24327, 529, 9124, 296, 2001, 273, 301, 19626, 2347, 301, 403, 529, 55536, 391, 289, 118546, 2885, 1250, 2219, 3223, 427, 529, 64458, 301, 27400, 1352, 268, 24327, 2347, 7507, 6964, 296, 259, 16578, 782, 1931, 1250, 220, 198, 126081]
+  Tokens:    ['\n', 'One', ' day', ' ,', ' a', ' cat', ' named', ' Wh', 'isk', 'ers', ' was', ' exploring', ' an', ' old', ' library', ' when', ' he', ' stumbled', ' upon', ' a', ' magical', ' portal', ' .', ' The', ' portal', ' was', ' covered', ' in', ' run', 'es', ' and', ' symbols', ' ,', ' and', ' it', ' was', ' glowing', ' with', ' an', ' eerie', ' light', ' .', ' Wh', 'isk', 'ers', ' was', ' intrigued', ' and', ' stepped', ' through', ' the', ' portal', ' ,', ' finding', ' himself', ' in', ' a', ' strange', ' new', ' world', ' .', ' ', '\n', '<|endoftext|>']

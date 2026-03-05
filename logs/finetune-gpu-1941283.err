@@ -1,0 +1,26 @@
+Lmod has detected the following error: These module(s) or extension(s) exist
+but cannot be loaded as requested: "gcc"
+   Try: "module spider gcc" to see how to load the module(s).
+
+
+
+/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/transformers/utils/generic.py:441: FutureWarning: `torch.utils._pytree._register_pytree_node` is deprecated. Please use `torch.utils._pytree.register_pytree_node` instead.
+  _torch_pytree._register_pytree_node(
+gpu-bind: usable_gres=0x1; bit_alloc=0x2; local_inx=1; global_list=1; local_list=0
+/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/transformers/utils/generic.py:441: FutureWarning: `torch.utils._pytree._register_pytree_node` is deprecated. Please use `torch.utils._pytree.register_pytree_node` instead.
+  _torch_pytree._register_pytree_node(
+/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/huggingface_hub/file_download.py:943: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+  warnings.warn(
+Special tokens have been added in the vocabulary, make sure the associated word embeddings are fine-tuned or trained.
+/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/transformers/utils/generic.py:309: FutureWarning: `torch.utils._pytree._register_pytree_node` is deprecated. Please use `torch.utils._pytree.register_pytree_node` instead.
+  _torch_pytree._register_pytree_node(
+/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/transformers/utils/generic.py:309: FutureWarning: `torch.utils._pytree._register_pytree_node` is deprecated. Please use `torch.utils._pytree.register_pytree_node` instead.
+  _torch_pytree._register_pytree_node(
+The model weights are not tied. Please use the `tie_weights` method before using the `infer_auto_device` function.
+Loading checkpoint shards:   0%|          | 0/6 [00:00<?, ?it/s]Loading checkpoint shards:  17%|█▋        | 1/6 [00:08<00:41,  8.39s/it]Loading checkpoint shards:  33%|███▎      | 2/6 [00:12<00:23,  5.95s/it]Loading checkpoint shards:  50%|█████     | 3/6 [00:18<00:18,  6.04s/it]Loading checkpoint shards:  67%|██████▋   | 4/6 [00:26<00:13,  6.54s/it]Loading checkpoint shards:  83%|████████▎ | 5/6 [00:33<00:06,  6.92s/it]Loading checkpoint shards: 100%|██████████| 6/6 [00:37<00:00,  5.97s/it]Loading checkpoint shards: 100%|██████████| 6/6 [00:37<00:00,  6.30s/it]
+/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/huggingface_hub/file_download.py:943: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+  warnings.warn(
+
+real	68m27.575s
+user	0m0.028s
+sys	0m0.001s

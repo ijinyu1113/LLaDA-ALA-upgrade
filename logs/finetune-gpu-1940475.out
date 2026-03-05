@@ -1,0 +1,8 @@
+=========================================
+JOB 1940475 on gh097.hsn.cm.delta.internal.ncsa.edu
+NVIDIA GH200 120GB, 97871 MiB, 550.163.01
+PyTorch 2.7.0.dev20250224+cu126
+CUDA 12.6
+GPU: NVIDIA GH200 120GB
+BF16: True
+=========================================

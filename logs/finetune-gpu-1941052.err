@@ -1,0 +1,7 @@
+Lmod has detected the following error: These module(s) or extension(s) exist
+but cannot be loaded as requested: "gcc"
+   Try: "module spider gcc" to see how to load the module(s).
+
+
+
+[2026-03-05T00:18:06.993] error: *** JOB 1941052 ON gh071 CANCELLED AT 2026-03-05T00:18:06 DUE to SIGNAL Terminated ***
