@@ -55,23 +55,25 @@ def eval_mask_accuracy(model, tokenizer, num_samples=20, p_mask=0.15):
         ids = enc["input_ids"].to(model.device)
         original = ids.clone()
 
+        # Create random mask: each position has p_mask probability of being masked
         mask_prob = torch.full(ids.shape, p_mask, device=ids.device)
-        mask_indices = torch.bernoulli(mask_prob).bool()
-        mask_indices[:, 0] = False
+        mask_indices = torch.bernoulli(mask_prob).bool()  # random True/False per position
+        mask_indices[:, 0] = False  # never mask first token (BOS)
 
         masked_ids = ids.clone()
-        masked_ids[mask_indices] = MASK_TOKEN_ID
+        masked_ids[mask_indices] = MASK_TOKEN_ID  # replace with [MASK] token
 
         if not mask_indices.any():
             continue
 
-        b_logits = model.base_logits(masked_ids)
-        r_logits = model(masked_ids).logits  # auto-alpha from actual mask ratio
+        b_logits = model.base_logits(masked_ids)          # [B, L, vocab] — baseline predictions
+        r_logits = model(masked_ids).logits                # [B, L, vocab] — router predictions (auto-alpha)
 
-        targets = original[mask_indices]
+        targets = original[mask_indices]                   # [N_masked] — ground-truth tokens at masked positions
+        # argmax picks highest-probability token; [mask_indices] selects only masked positions
         correct_base += (b_logits.argmax(dim=-1)[mask_indices] == targets).sum().item()
         correct_router += (r_logits.argmax(dim=-1)[mask_indices] == targets).sum().item()
-        total += targets.numel()
+        total += targets.numel()  # .numel() = number of elements in tensor
 
     base_acc = correct_base / total
     router_acc = correct_router / total
@@ -129,9 +131,11 @@ def eval_by_mask_ratio(model, tokenizer, num_samples=50):
             correct_base += (b_logits.argmax(-1)[mask_indices] == targets).sum().item()
             correct_router += (r_logits.argmax(-1)[mask_indices] == targets).sum().item()
 
-            # Confidence on correct token (drives remasking quality)
-            b_probs = F.softmax(b_logits[mask_indices], dim=-1)
+            # Confidence = probability assigned to the correct (gold) token
+            b_probs = F.softmax(b_logits[mask_indices], dim=-1)  # [N_masked, vocab_size] — probability distributions
             r_probs = F.softmax(r_logits[mask_indices], dim=-1)
+            # gather: use targets as column indices to look up P(correct_token) from each distribution
+            # targets.unsqueeze(-1) makes [N_masked, 1] to index into [N_masked, vocab] -> [N_masked, 1]
             base_conf_sum += b_probs.gather(-1, targets.unsqueeze(-1)).sum().item()
             router_conf_sum += r_probs.gather(-1, targets.unsqueeze(-1)).sum().item()
 
@@ -265,15 +269,19 @@ def eval_diversity(model, tokenizer, num_samples=5, temps=[0.0, 0.15, 0.3]):
                     print(f"    [{mode} #{s+1}]: {text[:80]}...")
                     f.write(f"[{mode} #{s+1}]\n{text}\n\n")
 
-                words_list = [t.lower().split() for t in texts]
-                flat = [w for wl in words_list for w in wl]
-                unique_ratio = len(set(flat)) / len(flat) if flat else 0
+                # --- Diversity metrics ---
+                words_list = [t.lower().split() for t in texts]  # tokenize each generation into word lists
+                flat = [w for wl in words_list for w in wl]      # flatten all words into one list
+                unique_ratio = len(set(flat)) / len(flat) if flat else 0  # unique words / total words
 
+                # Jaccard similarity: measure overlap between every pair of generations
+                # Lower Jaccard = more diverse outputs
                 sims = []
                 for i in range(len(words_list)):
                     for j in range(i + 1, len(words_list)):
                         s1, s2 = set(words_list[i]), set(words_list[j])
                         if s1 and s2:
+                            # Jaccard = |intersection| / |union| — 1.0 means identical, 0.0 means no overlap
                             sims.append(len(s1 & s2) / len(s1 | s2))
                 avg_jaccard = np.mean(sims) if sims else 1.0
 
@@ -321,57 +329,68 @@ def eval_entropy_over_steps(model, tokenizer, num_samples=3,
 
         for mode in ["base", "router"]:
             entropies = []
+            # Initialize: [prompt tokens] + [all MASK tokens for generation region]
             x = torch.full(
                 (1, prompt_ids.shape[1] + gen_length),
                 mask_id, dtype=torch.long, device=model.device
             )
-            x[:, :prompt_ids.shape[1]] = prompt_ids.clone()
+            x[:, :prompt_ids.shape[1]] = prompt_ids.clone()  # fill in prompt
 
+            # --- Iterative denoising: unmask tokens block-by-block, step-by-step ---
             for b_idx in range(num_blocks):
                 b_start = prompt_ids.shape[1] + (b_idx * block_length)
                 b_end = b_start + block_length
-                block_mask = (x[:, b_start:b_end] == mask_id)
+                block_mask = (x[:, b_start:b_end] == mask_id)  # which positions in this block are still masked
+                # Schedule: how many tokens to unmask at each step (e.g., [4, 4, 3, 3, ...])
                 transfer_schedule = get_num_transfer_tokens(
                     block_mask, steps_per_block
                 )
 
-                for i in range(steps_per_block):
-                    mask_index = (x == mask_id)
-                    # auto-alpha over generation region only
+                for i in range(steps_per_block):  # each step unmasks a few more tokens
+                    mask_index = (x == mask_id)    # [B, L] — current mask positions across entire sequence
                     logits = (
                         model(x, prompt_length=prompt_ids.shape[1]).logits
                         if mode == "router" else model.base_logits(x)
                     )
-                    logits[:, :, 126081] = -torch.inf
+                    logits[:, :, 126081] = -torch.inf  # suppress a special token
 
-                    # Entropy over masked positions
-                    masked_logits = logits[mask_index]
+                    # --- Measure entropy at masked positions ---
+                    # High entropy = model is uncertain; low entropy = model is confident
+                    masked_logits = logits[mask_index]  # [N_still_masked, vocab_size]
                     if masked_logits.shape[0] > 0:
                         probs = F.softmax(masked_logits.float(), dim=-1)
+                        # Shannon entropy: H = -sum(p * log(p)) — higher = more uncertain
                         ent = -(probs * torch.log(probs + 1e-10)).sum(
-                            dim=-1
-                        ).mean().item()
+                            dim=-1          # sum over vocab dimension -> [N_still_masked]
+                        ).mean().item()     # average across all masked positions -> scalar
                     else:
                         ent = 0.0
                     entropies.append(ent)
 
-                    # Unmask step
-                    x0 = torch.argmax(logits, dim=-1)
+                    # --- Unmask step: commit the most confident predictions ---
+                    x0 = torch.argmax(logits, dim=-1)    # [B, L] — greedy prediction at every position
                     probs_conf = F.softmax(logits, dim=-1)
+                    # gather: for each position, get the probability of the predicted token
+                    # x0.unsqueeze(-1) makes [B, L, 1] to index into [B, L, vocab] -> [B, L, 1]
+                    # squeeze(-1) removes the last dim -> [B, L]
                     x0_p = torch.gather(
                         probs_conf, dim=-1, index=x0.unsqueeze(-1)
-                    ).squeeze(-1)
-                    x0_p[:, b_end:] = -float('inf')
-                    x0 = torch.where(mask_index, x0, x)
-                    confidence = torch.where(mask_index, x0_p, -float('inf'))
+                    ).squeeze(-1)                         # [B, L] — confidence per position
+                    x0_p[:, b_end:] = -float('inf')       # don't unmask future blocks yet
 
+                    # Only use predictions at masked positions (keep already-committed tokens unchanged)
+                    x0 = torch.where(mask_index, x0, x)   # [B, L] — predictions at mask, original elsewhere
+                    confidence = torch.where(mask_index, x0_p, -float('inf'))  # -inf for non-masked (already done)
+
+                    # Select the top-k most confident positions to unmask this step
                     transfer_idx = torch.zeros_like(x, dtype=torch.bool)
-                    for j in range(confidence.shape[0]):
+                    for j in range(confidence.shape[0]):    # loop over batch
+                        # topk: returns (values, indices) of k highest elements
                         _, sel_idx = torch.topk(
-                            confidence[j], k=transfer_schedule[j, i]
+                            confidence[j], k=transfer_schedule[j, i]  # k = how many to unmask this step
                         )
                         transfer_idx[j, sel_idx] = True
-                    x[transfer_idx] = x0[transfer_idx]
+                    x[transfer_idx] = x0[transfer_idx]     # commit: replace [MASK] with predicted token
 
             if mode == "base":
                 all_base_ent.append(entropies)
@@ -417,6 +436,7 @@ def eval_flatness(model, tokenizer):
         for i in range(1, 11)
     ]
 
+    # Append one [MASK] token after the prompt — model predicts what comes next
     seq = torch.cat(
         [ids, torch.full((1, 1), MASK_TOKEN_ID, device=model.device)], dim=1
     )
@@ -425,12 +445,13 @@ def eval_flatness(model, tokenizer):
     for mode in ["Baseline", "Router"]:
         logits = (model(seq, prompt_length=ids.shape[1]).logits
                   if mode == "Router" else model.base_logits(seq))
-        probs = F.softmax(logits[0, -1, :].float(), dim=-1)
-        number_probs = probs[target_tokens]
+        probs = F.softmax(logits[0, -1, :].float(), dim=-1)  # probability distribution at the [MASK] position
+        number_probs = probs[target_tokens]  # select only P(1), P(2), ..., P(10) using their token IDs
 
+        # Shannon entropy over just the 10 number tokens
         ent = -(number_probs * torch.log(number_probs + 1e-9)).sum().item()
-        max_ent = np.log(len(target_tokens))
-        normalized_ent = ent / max_ent
+        max_ent = np.log(len(target_tokens))  # max possible entropy = log(10) for uniform distribution
+        normalized_ent = ent / max_ent         # 1.0 = perfectly uniform, 0.0 = all probability on one number
 
         results[mode] = {
             "probs": number_probs.detach().float().cpu().numpy(),
@@ -746,12 +767,16 @@ if __name__ == "__main__":
         device_map="auto"
     )
 
+    # Wrap base model + inference router into ALALLaDA (uses AMIPRouterInference internally)
     model = ALALLaDA(base_model).to(torch.bfloat16)
-    device = next(base_model.parameters()).device
+    device = next(base_model.parameters()).device  # get device from base model (could be multi-GPU)
     model.router.to(device)
 
+    # Load trained router weights (saved by train_router.py)
     weights_path = "amip_router_best.pt"
     if os.path.exists(weights_path):
+        # load_state_dict: loads {param_name: tensor} dict into the router's parameters
+        # map_location ensures weights are loaded to the correct device
         model.router.load_state_dict(
             torch.load(weights_path, map_location=device)
         )
