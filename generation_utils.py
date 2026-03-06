@@ -23,7 +23,7 @@ def get_num_transfer_tokens(mask_index, steps):
 
 
 @torch.no_grad()
-def generate(model, prompt_ids, steps=128, gen_length=128, block_length=32, use_router=True, temp=0.0):
+def generate(model, prompt_ids, steps=128, gen_length=128, block_length=32, use_router=True, temp=0.0, alpha=None):
 
     """Full LLaDA generation with block-wise confidence-based unmasking.
 
@@ -49,7 +49,7 @@ def generate(model, prompt_ids, steps=128, gen_length=128, block_length=32, use_
             mask_index = (x == mask_id)
             # Pass prompt_length so forward computes p_mask over
             # generation region only (prompt tokens are never masked)
-            logits = (model(x, prompt_length=prompt_ids.shape[1]).logits
+            logits = (model(x, prompt_length=prompt_ids.shape[1], alpha=alpha).logits
                       if use_router else model.base_logits(x))
             #logits[:, :, 126081] = -torch.inf
 
