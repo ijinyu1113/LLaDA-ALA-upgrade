@@ -23,6 +23,10 @@ ALPHA_BASE = 0.1
 ALPHA_SCALE = 0.0  # flat alpha — adaptive schedule hurt generation quality
 MASK_TOKEN_ID = 126336
 RANGE_R = 10  # how far to look for unmasked anchors
+# Special tokens whose logits the router must never modify.
+# Without this, the router's delta suppresses termination tokens,
+# causing infinite repetition loops (e.g. "#### 18 #### 18 ####...")
+SPECIAL_TOKEN_IDS = [126081, 126348]  # <|endoftext|>, <|eot_id|>
 
 
 def _make_experts(d_model, K):
@@ -231,6 +235,12 @@ class ALALLaDA(nn.Module):
         logits = self.base_model.model.transformer.ff_out(blended)
         if self.base_model.model.config.scale_logits:
             logits *= 1.0 / math.sqrt(self.base_model.model.config.d_model)
+
+        # Restore base model's logits for special tokens (endoftext, eot_id).
+        # The base model forward pass already computed these — zero extra cost.
+        # This prevents the router delta from suppressing termination signals.
+        base_logits = outputs.logits
+        logits[:, :, SPECIAL_TOKEN_IDS] = base_logits[:, :, SPECIAL_TOKEN_IDS]
 
         # Create a simple object with .logits attribute (duck-typing to match HuggingFace output format)
         return type('Obj', (object,), {'logits': logits})()

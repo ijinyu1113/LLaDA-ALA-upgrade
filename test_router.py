@@ -483,11 +483,14 @@ def eval_gsm8k(model, tokenizer, num_samples=50,
     def extract_answer(text):
         if "####" in text:
             after = text.split("####")[-1].strip()
-            match = re.match(r'-?\d+\.?\d*', after)
+            # Strip trailing periods/commas/spaces that router may add
+            match = re.match(r'-?\d[\d,]*\.?\d*', after)
             if match:
-                return match.group()
-        numbers = re.findall(r'-?\d+\.?\d*', text)
-        return numbers[-1] if numbers else ""
+                return match.group().rstrip('.').replace(',', '')
+        numbers = re.findall(r'-?\d[\d,]*\.?\d*', text)
+        if numbers:
+            return numbers[-1].rstrip('.').replace(',', '')
+        return ""
 
     def extract_gold_answer(answer_text):
         if "####" in answer_text:
