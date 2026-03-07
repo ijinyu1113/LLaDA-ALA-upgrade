@@ -1,0 +1,287 @@
+=========================================
+JOB 1945829 on gh063.hsn.cm.delta.internal.ncsa.edu
+NVIDIA GH200 120GB, 97871 MiB, 570.172.08
+PyTorch 2.5.1
+Transformers 4.36.2
+CUDA 12.4
+GPU: NVIDIA GH200 120GB
+BF16 supported? True
+=========================================
+Loading tokenizer and base model...
+Router loaded from amip_router_best.pt
+
+Alpha schedule: alpha = 0.1 + 0.0 * p_mask
+  p=0.15 -> alpha=0.1000
+  p=0.50 -> alpha=0.1000
+  p=0.95 -> alpha=0.1000
+
+============================================================
+EVAL 1: Single-Step Mask Prediction Accuracy (p_mask=0.15)
+  alpha = 0.1000
+============================================================
+  Baseline: 0.7795
+  Router:   0.7885
+  Δ Acc:    +0.0091
+
+============================================================
+EVAL 2: Accuracy & Confidence by Mask Ratio
+============================================================
+  p=0.15 α=0.100 | Acc  Base:0.7276 Router:0.7439 Δ:+0.0163 | Conf Base:0.6480 Router:0.6682 Δ:+0.0202
+  p=0.30 α=0.100 | Acc  Base:0.6770 Router:0.6973 Δ:+0.0203 | Conf Base:0.5889 Router:0.6121 Δ:+0.0232
+  p=0.50 α=0.100 | Acc  Base:0.5041 Router:0.5256 Δ:+0.0215 | Conf Base:0.4028 Router:0.4300 Δ:+0.0272
+  p=0.70 α=0.100 | Acc  Base:0.3334 Router:0.3600 Δ:+0.0266 | Conf Base:0.2372 Router:0.2614 Δ:+0.0243
+  p=0.85 α=0.100 | Acc  Base:0.1401 Router:0.1733 Δ:+0.0333 | Conf Base:0.0764 Router:0.0965 Δ:+0.0201
+  p=0.95 α=0.100 | Acc  Base:0.0430 Router:0.0642 Δ:+0.0212 | Conf Base:0.0203 Router:0.0269 Δ:+0.0066
+
+============================================================
+EVAL 3: Logical Reasoning (temps=[0.0, 0.15, 0.3])
+============================================================
+
+  --- Temperature: 0.0 ---
+  Category        | Expected   | Baseline                       | Router                        
+  ------------------------------------------------------------------------------------------
+  Triple Swap     | banana     | ✗ cherry.                      | ✗ cherry.                     
+  Distractor      | copper     | ✓ copper coin.                 | ✓ copper coin.                
+  Relational      | building   | ✓ building.                    | ✓ building.                   
+  State Swap      | ball       | ✓ ball.                        | ✓ ball and the box has the key
+  Score: Baseline 3/4 | Router 3/4
+
+  --- Temperature: 0.15 ---
+  Category        | Expected   | Baseline                       | Router                        
+  ------------------------------------------------------------------------------------------
+  Triple Swap     | banana     | ✗ cherry.                      | ✗ cherry                      
+  Distractor      | copper     | ✓ copper coin.                 | ✓ copper coin.                
+  Relational      | building   | ✓ building.                    | ✓ building.                   
+  State Swap      | ball       | ✓ ball.                        | ✓ ball and the box has the key
+  Score: Baseline 3/4 | Router 3/4
+
+  --- Temperature: 0.3 ---
+  Category        | Expected   | Baseline                       | Router                        
+  ------------------------------------------------------------------------------------------
+  Triple Swap     | banana     | ✗ cherry.                      | ✗ cherry                      
+  Distractor      | copper     | ✓ copper coin.                 | ✓ copper coin.                
+  Relational      | building   | ✓ building.                    | ✓ building.                   
+  State Swap      | ball       | ✓ ball.                        | ✓ ball and the box has the key
+  Score: Baseline 3/4 | Router 3/4
+
+============================================================
+EVAL 4: Generation Diversity (temps=[0.0, 0.15, 0.3], samples=5)
+============================================================
+
+  --- Temperature: 0.0 ---
+    [Baseline #1]: Once upon a time, there was a cat named Whiskers who loved to explore the librar...
+    [Baseline #2]: Once upon a time, there was a cat named Whiskers who loved to explore the librar...
+    [Baseline #3]: Once upon a time, there was a cat named Whiskers who loved to explore the librar...
+    [Baseline #4]: Once upon a time, there was a cat named Whiskers who loved to explore the librar...
+    [Baseline #5]: Once upon a time, there was a cat named Whiskers who loved to explore the librar...
+    [Baseline] Unique: 0.1724 | Jaccard: 1.0000
+    [Router #1]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router #2]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router #3]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router #4]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router #5]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router] Unique: 0.1429 | Jaccard: 1.0000
+
+  --- Temperature: 0.15 ---
+    [Baseline #1]: Once upon a time, there was a cat named Whiskers who loved to explore the librar...
+    [Baseline #2]: Once upon a time, there was a cat named Whiskers who loved to explore the world....
+    [Baseline #3]: One day, a curious cat named Whiskers stumbled upon a magical portal in the libr...
+    [Baseline #4]: Once upon a time, there was a cat named Whiskers who loved to explore the librar...
+    [Baseline #5]: Once upon a time, there was a cat named Whiskers who loved to explore the world....
+    [Baseline] Unique: 0.2746 | Jaccard: 0.6117
+    [Router #1]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router #2]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router #3]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router #4]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router #5]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router] Unique: 0.1898 | Jaccard: 0.7336
+
+  --- Temperature: 0.3 ---
+    [Baseline #1]: One day, a curious cat named Whiskers stumbled upon a magical portal in the libr...
+    [Baseline #2]: Once upon a time, there was a cat named Whiskers who loved to explore the world....
+    [Baseline #3]: One day, a curious cat named Whiskers stumbled upon a magical portal in the libr...
+    [Baseline #4]: One day, a curious cat named Whiskers stumbled upon a magical portal in the libr...
+    [Baseline #5]: Once upon a time, there was a cat named Whiskers who loved to explore the world....
+    [Baseline] Unique: 0.2941 | Jaccard: 0.5469
+    [Router #1]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router #2]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router #3]: Once upon a time , there was a cat named Whiskers who lived in a small town . On...
+    [Router #4]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router #5]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router] Unique: 0.2539 | Jaccard: 0.5661
+
+  Stories saved to generated_stories.txt
+
+============================================================
+EVAL 5: Entropy Across Denoising Steps
+============================================================
+  Sample 1/3
+  Sample 2/3
+  Sample 3/3
+  Mean Base Entropy:   4.7305
+  Mean Router Entropy: 4.8578
+  Entropy plot saved to entropy_curve.png
+
+============================================================
+EVAL 6: Distribution Flatness
+============================================================
+  [Baseline] Entropy: 0.0015 | Normalized: 0.0006
+    P(1) = 0.0000
+    P(2) = 0.0000
+    P(3) = 0.0000
+    P(4) = 0.0000
+    P(5) = 0.0000
+    P(6) = 0.0000
+    P(7) = 0.0000
+    P(8) = 0.0000
+    P(9) = 0.0000
+    P(10) = 0.0000
+  [Router] Entropy: 0.0027 | Normalized: 0.0012
+    P(1) = 0.0000
+    P(2) = 0.0000
+    P(3) = 0.0000
+    P(4) = 0.0000
+    P(5) = 0.0000
+    P(6) = 0.0000
+    P(7) = 0.0000
+    P(8) = 0.0000
+    P(9) = 0.0000
+    P(10) = 0.0000
+  Flatness plot saved to flatness.png
+
+============================================================
+EVAL 7: GSM8K End-to-End Accuracy (n=100)
+============================================================
+  [Baseline] Q1 ✓ | Gold: 18 | Pred: 18
+    Response: To determine how much money Janet makes every day at the farmers' market, we need to follow these steps:
+
+1. Calculate the total number of eggs laid b...
+  [Router] Q1 ✓ | Gold: 18 | Pred: 18
+    Response: To determine how much money Janet makes every day at the farmers' market, we need to follow these steps:
+
+1. Calculate the total number of eggs laid b...
+  [Baseline] Q2 ✓ | Gold: 3 | Pred: 3
+    Response: To determine the total number of bolts required for the robe, we need to add the bolts of blue fiber and the bolts of white fiber.
+
+1. The robe takes ...
+  [Router] Q2 ✓ | Gold: 3 | Pred: 3
+    Response: To determine the total number of bolts required for the robe, we need to add the bolts of blue fiber and the bolts of white fiber together.
+
+1. The ro...
+  [Baseline] Q3 ✗ | Gold: 70000 | Pred: 40000
+  [Router] Q3 ✗ | Gold: 70000 | Pred: 40000
+  [Baseline] Q4 ✓ | Gold: 540 | Pred: 540
+  [Router] Q4 ✓ | Gold: 540 | Pred: 540
+  [Baseline] Q5 ✓ | Gold: 20 | Pred: 20
+  [Router] Q5 ✓ | Gold: 20 | Pred: 20
+  Progress 10/100 | Baseline: 0.7000
+  Progress 10/100 | Router: 0.6000
+  Progress 20/100 | Baseline: 0.7500
+  Progress 20/100 | Router: 0.6500
+  Progress 30/100 | Baseline: 0.6333
+  Progress 30/100 | Router: 0.6333
+  Progress 40/100 | Baseline: 0.6750
+  Progress 40/100 | Router: 0.7000
+  Progress 50/100 | Baseline: 0.7000
+  Progress 50/100 | Router: 0.7000
+  Progress 60/100 | Baseline: 0.7167
+  Progress 60/100 | Router: 0.7167
+  Progress 70/100 | Baseline: 0.7286
+  Progress 70/100 | Router: 0.7143
+  Progress 80/100 | Baseline: 0.7250
+  Progress 80/100 | Router: 0.7125
+  Progress 90/100 | Baseline: 0.7333
+  Progress 90/100 | Router: 0.7222
+  Progress 100/100 | Baseline: 0.7500
+  Progress 100/100 | Router: 0.7300
+
+  Baseline GSM8K Accuracy: 0.7500 (75/100)
+
+  Router GSM8K Accuracy: 0.7300 (73/100)
+
+============================================================
+EVAL 8: MATH End-to-End Accuracy (n=50)
+============================================================
+  [Baseline] Q1 ✓ | Gold: 2 | Pred: 2
+    Response: To determine the number of vertical asymptotes of the function \( y = \frac{2}{x^2 + x - 6} \), we need to identify the values of \( x \) that make th...
+  [Router] Q1 ✓ | Gold: 2 | Pred: 2
+    Response: To find the vertical asymptotes of the function \( y = \frac{2}{x^2 + x - 6} \), we need to determine the values of \( x \) that make the denominator ...
+  [Baseline] Q2 ✓ | Gold: 10 | Pred: 10
+    Response: To find the positive difference between $120\%$ of 30 and $130\%$ of 20, we will follow these steps:
+
+1. Calculate $120\%$ of 30.
+2. Calculate $130\%$...
+  [Router] Q2 ✓ | Gold: 10 | Pred: 10
+    Response: First, we need to find $120\%$ of 30 and $130\%$ of 20.
+
+1. Calculate $120\%$ of 30:
+   \[
+   120\% \text{ of } 30 = \frac{120}{100} \times 30 = 1.2 \...
+  [Baseline] Q3 ✗ | Gold: \dfrac{9}{7} | Pred: \dfrac{2}{7}
+  [Router] Q3 ✓ | Gold: \dfrac{9}{7} | Pred: \dfrac{9}{7}
+  Progress 10/50 | Baseline: 0.6000
+  Progress 10/50 | Router: 0.6000
+  Progress 20/50 | Baseline: 0.6500
+  Progress 20/50 | Router: 0.6500
+  Progress 30/50 | Baseline: 0.5333
+  Progress 30/50 | Router: 0.5667
+  Progress 40/50 | Baseline: 0.4750
+  Progress 40/50 | Router: 0.5250
+  Progress 50/50 | Baseline: 0.4600
+  Progress 50/50 | Router: 0.5000
+
+  Baseline MATH Accuracy: 0.4600 (23/50)
+
+  Router MATH Accuracy: 0.5000 (25/50)
+  Sweep summary plot saved to sweep_summary.png
+
+================================================================================
+COMPLETE EVALUATION SUMMARY
+  Alpha schedule: 0.1 + 0.0 * p_mask
+================================================================================
+
+  1. Mask Prediction Accuracy (single-step, p=0.15)
+     Baseline: 0.7795  |  Router: 0.7885  |  Δ: +0.0091
+
+  2. Mask Accuracy by Ratio
+     p_mask   | α      | Base Acc   | Router Acc   | Δ Acc      | Δ Conf    
+     --------------------------------------------------------------
+     0.15     | 0.100  | 0.7276     | 0.7439       | +0.0163    | +0.0202   
+     0.30     | 0.100  | 0.6770     | 0.6973       | +0.0203    | +0.0232   
+     0.50     | 0.100  | 0.5041     | 0.5256       | +0.0215    | +0.0272   
+     0.70     | 0.100  | 0.3334     | 0.3600       | +0.0266    | +0.0243   
+     0.85     | 0.100  | 0.1401     | 0.1733       | +0.0333    | +0.0201   
+     0.95     | 0.100  | 0.0430     | 0.0642       | +0.0212    | +0.0066   
+
+  3. Logical Reasoning Accuracy
+     Temp     | Baseline   | Router     | Δ         
+     ------------------------------------------
+     0.0      | 0.7500     | 0.7500     | +0.0000   
+     0.15     | 0.7500     | 0.7500     | +0.0000   
+     0.3      | 0.7500     | 0.7500     | +0.0000   
+
+  4. Diversity (Jaccard Similarity — lower is more diverse)
+     Temp     | Base Jaccard   | Router Jaccard   | Base Unique    | Router Unique 
+     ----------------------------------------------------------------------
+     0.0      | 1.0000         | 1.0000           | 0.1724         | 0.1429        
+     0.15     | 0.6117         | 0.7336           | 0.2746         | 0.1898        
+     0.3      | 0.5469         | 0.5661           | 0.2941         | 0.2539        
+
+  5. Entropy Across Denoising Steps
+     Mean Base: 4.7305  |  Mean Router: 4.8578  |  Δ: +0.1273
+
+  6. Distribution Flatness (normalized entropy, 1.0 = uniform)
+     Baseline: 0.0006  |  Router: 0.0012
+
+  7. GSM8K End-to-End Accuracy
+     Baseline: 0.7500 (75/100)
+     Router:   0.7300 (73/100)
+
+  8. MATH End-to-End Accuracy
+     Baseline: 0.4600 (23/50)
+     Router:   0.5000 (25/50)
+
+================================================================================
+Results saved to eval_results.json
+Plots saved: entropy_curve.png, flatness.png, sweep_summary.png
+Stories saved: generated_stories.txt

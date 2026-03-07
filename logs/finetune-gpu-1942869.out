@@ -1,0 +1,436 @@
+=========================================
+JOB 1942869 on gh053.hsn.cm.delta.internal.ncsa.edu
+NVIDIA GH200 120GB, 97871 MiB, 570.172.08
+PyTorch 2.5.1
+Transformers 4.36.2
+CUDA 12.4
+GPU: NVIDIA GH200 120GB
+BF16 supported? True
+=========================================
+Loading datasets...
+  Wikitext train: 804413
+  GSM8K train: 7473
+  MATH train: 7500
+  GSM8K upsampled: 7473 x 12 = 89676
+  MATH upsampled:  7500 x 12 = 90000
+  Combined train:  984089 (~50% math)
+Creating dataloaders...
+============================================================
+Training ALA Router (preliminary)
+  Dataset:    wikitext-103 + GSM8K + MATH
+  Max steps:  10000
+  Batch size: 8 x 4 grad_accum = 32 effective
+  Alpha:      0.1 + 0.0 * p_mask
+  range_r:    10
+  p_mask:     U[0.3, 1.0]
+  Compile:    max-autotune | Optimizer: fused AdamW | Precision: bf16
+============================================================
+First training step starting...
+  Step 100/10000 | Loss: 2.9127 | p_mask: 0.99 | alpha: 0.100 | Pairs: 708 | Steps/s: 2.47 | ETA: 66.8min
+  Step 200/10000 | Loss: 2.7702 | p_mask: 0.52 | alpha: 0.100 | Pairs: 6402 | Steps/s: 2.51 | ETA: 65.2min
+  Step 300/10000 | Loss: 2.6673 | p_mask: 0.77 | alpha: 0.100 | Pairs: 3976 | Steps/s: 2.52 | ETA: 64.1min
+  Step 400/10000 | Loss: 2.6459 | p_mask: 0.58 | alpha: 0.100 | Pairs: 6395 | Steps/s: 2.52 | ETA: 63.4min
+  Step 500/10000 | Loss: 2.7615 | p_mask: 0.54 | alpha: 0.100 | Pairs: 6379 | Steps/s: 2.53 | ETA: 62.6min
+  >>> Validation Loss: 3.1372 (best: inf)
+  >>> New best model saved!
+  Step 600/10000 | Loss: 2.7676 | p_mask: 0.73 | alpha: 0.100 | Pairs: 4738 | Steps/s: 2.50 | ETA: 62.8min
+  Step 700/10000 | Loss: 2.7368 | p_mask: 0.45 | alpha: 0.100 | Pairs: 6675 | Steps/s: 2.50 | ETA: 61.9min
+  Step 800/10000 | Loss: 2.8025 | p_mask: 0.67 | alpha: 0.100 | Pairs: 5385 | Steps/s: 2.51 | ETA: 61.2min
+  Step 900/10000 | Loss: 2.6190 | p_mask: 0.85 | alpha: 0.100 | Pairs: 3824 | Steps/s: 2.51 | ETA: 60.4min
+  Step 1000/10000 | Loss: 2.6469 | p_mask: 0.92 | alpha: 0.100 | Pairs: 2236 | Steps/s: 2.51 | ETA: 59.7min
+  >>> Validation Loss: 3.0141 (best: 3.1372)
+  >>> New best model saved!
+  Step 1100/10000 | Loss: 2.7170 | p_mask: 0.35 | alpha: 0.100 | Pairs: 5427 | Steps/s: 2.50 | ETA: 59.4min
+  Step 1200/10000 | Loss: 2.6763 | p_mask: 0.39 | alpha: 0.100 | Pairs: 5003 | Steps/s: 2.50 | ETA: 58.6min
+  Step 1300/10000 | Loss: 2.6669 | p_mask: 0.49 | alpha: 0.100 | Pairs: 7100 | Steps/s: 2.50 | ETA: 57.9min
+  Step 1400/10000 | Loss: 2.7667 | p_mask: 0.89 | alpha: 0.100 | Pairs: 2706 | Steps/s: 2.51 | ETA: 57.2min
+  Step 1500/10000 | Loss: 2.7401 | p_mask: 0.46 | alpha: 0.100 | Pairs: 4489 | Steps/s: 2.51 | ETA: 56.5min
+  >>> Validation Loss: 3.0253 (best: 3.0141)
+  Step 1600/10000 | Loss: 2.7051 | p_mask: 0.81 | alpha: 0.100 | Pairs: 4162 | Steps/s: 2.50 | ETA: 56.0min
+  Step 1700/10000 | Loss: 2.7524 | p_mask: 0.71 | alpha: 0.100 | Pairs: 4682 | Steps/s: 2.50 | ETA: 55.3min
+  Step 1800/10000 | Loss: 2.6062 | p_mask: 0.40 | alpha: 0.100 | Pairs: 5604 | Steps/s: 2.50 | ETA: 54.6min
+  Step 1900/10000 | Loss: 2.7308 | p_mask: 0.75 | alpha: 0.100 | Pairs: 4020 | Steps/s: 2.51 | ETA: 53.9min
+  Step 2000/10000 | Loss: 2.5565 | p_mask: 0.41 | alpha: 0.100 | Pairs: 7181 | Steps/s: 2.51 | ETA: 53.2min
+  >>> Validation Loss: 2.9667 (best: 3.0141)
+  >>> New best model saved!
+  Step 2100/10000 | Loss: 2.6085 | p_mask: 0.84 | alpha: 0.100 | Pairs: 3131 | Steps/s: 2.50 | ETA: 52.7min
+  Step 2200/10000 | Loss: 2.5865 | p_mask: 0.54 | alpha: 0.100 | Pairs: 5632 | Steps/s: 2.50 | ETA: 52.0min
+  Step 2300/10000 | Loss: 2.6529 | p_mask: 0.90 | alpha: 0.100 | Pairs: 2314 | Steps/s: 2.50 | ETA: 51.3min
+  Step 2400/10000 | Loss: 2.5623 | p_mask: 0.75 | alpha: 0.100 | Pairs: 3810 | Steps/s: 2.50 | ETA: 50.6min
+  Step 2500/10000 | Loss: 2.7568 | p_mask: 0.40 | alpha: 0.100 | Pairs: 7241 | Steps/s: 2.51 | ETA: 49.9min
+  >>> Validation Loss: 2.9411 (best: 2.9667)
+  >>> New best model saved!
+  Step 2600/10000 | Loss: 2.7053 | p_mask: 0.58 | alpha: 0.100 | Pairs: 6266 | Steps/s: 2.50 | ETA: 49.4min
+  Step 2700/10000 | Loss: 2.6425 | p_mask: 0.75 | alpha: 0.100 | Pairs: 3966 | Steps/s: 2.50 | ETA: 48.7min
+  Step 2800/10000 | Loss: 2.6954 | p_mask: 0.78 | alpha: 0.100 | Pairs: 4408 | Steps/s: 2.50 | ETA: 48.0min
+  Step 2900/10000 | Loss: 2.7310 | p_mask: 0.67 | alpha: 0.100 | Pairs: 5468 | Steps/s: 2.50 | ETA: 47.3min
+  Step 3000/10000 | Loss: 2.6574 | p_mask: 0.54 | alpha: 0.100 | Pairs: 5775 | Steps/s: 2.50 | ETA: 46.6min
+  >>> Validation Loss: 3.0294 (best: 2.9411)
+  Step 3100/10000 | Loss: 2.6656 | p_mask: 0.52 | alpha: 0.100 | Pairs: 5667 | Steps/s: 2.50 | ETA: 46.0min
+  Step 3200/10000 | Loss: 2.7775 | p_mask: 0.31 | alpha: 0.100 | Pairs: 6661 | Steps/s: 2.50 | ETA: 45.3min
+  Step 3300/10000 | Loss: 2.5494 | p_mask: 0.56 | alpha: 0.100 | Pairs: 6785 | Steps/s: 2.50 | ETA: 44.6min
+  Step 3400/10000 | Loss: 2.5933 | p_mask: 0.47 | alpha: 0.100 | Pairs: 7396 | Steps/s: 2.50 | ETA: 44.0min
+  Step 3500/10000 | Loss: 2.5570 | p_mask: 0.53 | alpha: 0.100 | Pairs: 5174 | Steps/s: 2.50 | ETA: 43.3min
+  >>> Validation Loss: 2.9831 (best: 2.9411)
+  Step 3600/10000 | Loss: 2.6718 | p_mask: 0.65 | alpha: 0.100 | Pairs: 4789 | Steps/s: 2.50 | ETA: 42.7min
+  Step 3700/10000 | Loss: 2.6029 | p_mask: 0.76 | alpha: 0.100 | Pairs: 5435 | Steps/s: 2.50 | ETA: 42.0min
+  Step 3800/10000 | Loss: 2.5622 | p_mask: 0.47 | alpha: 0.100 | Pairs: 5420 | Steps/s: 2.50 | ETA: 41.3min
+  Step 3900/10000 | Loss: 2.6491 | p_mask: 0.46 | alpha: 0.100 | Pairs: 6430 | Steps/s: 2.50 | ETA: 40.6min
+  Step 4000/10000 | Loss: 2.7920 | p_mask: 0.79 | alpha: 0.100 | Pairs: 4506 | Steps/s: 2.50 | ETA: 39.9min
+  >>> Validation Loss: 2.9969 (best: 2.9411)
+  Step 4100/10000 | Loss: 2.6137 | p_mask: 0.39 | alpha: 0.100 | Pairs: 5866 | Steps/s: 2.50 | ETA: 39.3min
+  Step 4200/10000 | Loss: 2.4700 | p_mask: 0.81 | alpha: 0.100 | Pairs: 2201 | Steps/s: 2.50 | ETA: 38.6min
+  Step 4300/10000 | Loss: 2.5103 | p_mask: 0.56 | alpha: 0.100 | Pairs: 6823 | Steps/s: 2.50 | ETA: 38.0min
+  Step 4400/10000 | Loss: 2.6410 | p_mask: 0.30 | alpha: 0.100 | Pairs: 4956 | Steps/s: 2.50 | ETA: 37.3min
+  Step 4500/10000 | Loss: 2.5636 | p_mask: 0.88 | alpha: 0.100 | Pairs: 2776 | Steps/s: 2.50 | ETA: 36.6min
+  >>> Validation Loss: 2.9820 (best: 2.9411)
+  Step 4600/10000 | Loss: 2.5374 | p_mask: 0.73 | alpha: 0.100 | Pairs: 4474 | Steps/s: 2.50 | ETA: 36.0min
+  Step 4700/10000 | Loss: 2.6161 | p_mask: 0.73 | alpha: 0.100 | Pairs: 4797 | Steps/s: 2.50 | ETA: 35.3min
+  Step 4800/10000 | Loss: 2.5423 | p_mask: 0.33 | alpha: 0.100 | Pairs: 5136 | Steps/s: 2.50 | ETA: 34.6min
+  Step 4900/10000 | Loss: 2.7112 | p_mask: 0.58 | alpha: 0.100 | Pairs: 6358 | Steps/s: 2.50 | ETA: 33.9min
+  Step 5000/10000 | Loss: 2.7124 | p_mask: 0.92 | alpha: 0.100 | Pairs: 2205 | Steps/s: 2.50 | ETA: 33.3min
+  >>> Validation Loss: 2.8682 (best: 2.9411)
+  >>> New best model saved!
+  Step 5100/10000 | Loss: 2.6090 | p_mask: 0.50 | alpha: 0.100 | Pairs: 4752 | Steps/s: 2.50 | ETA: 32.6min
+  Step 5200/10000 | Loss: 2.6257 | p_mask: 0.98 | alpha: 0.100 | Pairs: 1019 | Steps/s: 2.50 | ETA: 32.0min
+  Step 5300/10000 | Loss: 2.5921 | p_mask: 0.64 | alpha: 0.100 | Pairs: 5690 | Steps/s: 2.50 | ETA: 31.3min
+  Step 5400/10000 | Loss: 2.8041 | p_mask: 0.58 | alpha: 0.100 | Pairs: 4828 | Steps/s: 2.50 | ETA: 30.6min
+  Step 5500/10000 | Loss: 2.5633 | p_mask: 0.86 | alpha: 0.100 | Pairs: 3878 | Steps/s: 2.50 | ETA: 30.0min
+  >>> Validation Loss: 3.0070 (best: 2.8682)
+  Step 5600/10000 | Loss: 2.6412 | p_mask: 0.66 | alpha: 0.100 | Pairs: 6265 | Steps/s: 2.50 | ETA: 29.3min
+  Step 5700/10000 | Loss: 2.6644 | p_mask: 0.63 | alpha: 0.100 | Pairs: 7310 | Steps/s: 2.50 | ETA: 28.6min
+  Step 5800/10000 | Loss: 2.6073 | p_mask: 0.49 | alpha: 0.100 | Pairs: 6097 | Steps/s: 2.50 | ETA: 28.0min
+  Step 5900/10000 | Loss: 2.5068 | p_mask: 0.36 | alpha: 0.100 | Pairs: 4647 | Steps/s: 2.50 | ETA: 27.3min
+  Step 6000/10000 | Loss: 2.6523 | p_mask: 0.53 | alpha: 0.100 | Pairs: 5384 | Steps/s: 2.50 | ETA: 26.6min
+  >>> Validation Loss: 2.9167 (best: 2.8682)
+  Step 6100/10000 | Loss: 2.6009 | p_mask: 0.88 | alpha: 0.100 | Pairs: 3069 | Steps/s: 2.50 | ETA: 26.0min
+  Step 6200/10000 | Loss: 2.5971 | p_mask: 0.65 | alpha: 0.100 | Pairs: 6290 | Steps/s: 2.50 | ETA: 25.3min
+  Step 6300/10000 | Loss: 2.6790 | p_mask: 0.82 | alpha: 0.100 | Pairs: 4090 | Steps/s: 2.50 | ETA: 24.6min
+  Step 6400/10000 | Loss: 2.5963 | p_mask: 0.65 | alpha: 0.100 | Pairs: 5815 | Steps/s: 2.50 | ETA: 24.0min
+  Step 6500/10000 | Loss: 2.6251 | p_mask: 0.56 | alpha: 0.100 | Pairs: 5000 | Steps/s: 2.50 | ETA: 23.3min
+  >>> Validation Loss: 2.9255 (best: 2.8682)
+  Step 6600/10000 | Loss: 2.6172 | p_mask: 0.55 | alpha: 0.100 | Pairs: 4899 | Steps/s: 2.50 | ETA: 22.7min
+  Step 6700/10000 | Loss: 2.5377 | p_mask: 0.83 | alpha: 0.100 | Pairs: 3712 | Steps/s: 2.50 | ETA: 22.0min
+  Step 6800/10000 | Loss: 2.7395 | p_mask: 0.88 | alpha: 0.100 | Pairs: 1691 | Steps/s: 2.50 | ETA: 21.3min
+  Step 6900/10000 | Loss: 2.6014 | p_mask: 0.32 | alpha: 0.100 | Pairs: 4936 | Steps/s: 2.50 | ETA: 20.6min
+  Step 7000/10000 | Loss: 2.5456 | p_mask: 0.84 | alpha: 0.100 | Pairs: 2442 | Steps/s: 2.50 | ETA: 20.0min
+  >>> Validation Loss: 2.9117 (best: 2.8682)
+  Step 7100/10000 | Loss: 2.6301 | p_mask: 0.98 | alpha: 0.100 | Pairs: 829 | Steps/s: 2.50 | ETA: 19.3min
+  Step 7200/10000 | Loss: 2.5457 | p_mask: 0.49 | alpha: 0.100 | Pairs: 4575 | Steps/s: 2.50 | ETA: 18.6min
+  Step 7300/10000 | Loss: 2.5963 | p_mask: 0.99 | alpha: 0.100 | Pairs: 690 | Steps/s: 2.50 | ETA: 18.0min
+  Step 7400/10000 | Loss: 2.6955 | p_mask: 0.77 | alpha: 0.100 | Pairs: 4595 | Steps/s: 2.50 | ETA: 17.3min
+  Step 7500/10000 | Loss: 2.7122 | p_mask: 0.50 | alpha: 0.100 | Pairs: 6082 | Steps/s: 2.50 | ETA: 16.6min
+  >>> Validation Loss: 2.9490 (best: 2.8682)
+  Step 7600/10000 | Loss: 2.5743 | p_mask: 0.46 | alpha: 0.100 | Pairs: 5787 | Steps/s: 2.50 | ETA: 16.0min
+  Step 7700/10000 | Loss: 2.6726 | p_mask: 0.54 | alpha: 0.100 | Pairs: 6843 | Steps/s: 2.50 | ETA: 15.3min
+  Step 7800/10000 | Loss: 2.5798 | p_mask: 0.37 | alpha: 0.100 | Pairs: 5753 | Steps/s: 2.50 | ETA: 14.7min
+  Step 7900/10000 | Loss: 2.5300 | p_mask: 0.95 | alpha: 0.100 | Pairs: 1308 | Steps/s: 2.50 | ETA: 14.0min
+  Step 8000/10000 | Loss: 2.6665 | p_mask: 0.51 | alpha: 0.100 | Pairs: 4584 | Steps/s: 2.50 | ETA: 13.3min
+  >>> Validation Loss: 2.9242 (best: 2.8682)
+  Step 8100/10000 | Loss: 2.6284 | p_mask: 0.86 | alpha: 0.100 | Pairs: 2674 | Steps/s: 2.50 | ETA: 12.7min
+  Step 8200/10000 | Loss: 2.6442 | p_mask: 0.63 | alpha: 0.100 | Pairs: 5230 | Steps/s: 2.50 | ETA: 12.0min
+  Step 8300/10000 | Loss: 2.6411 | p_mask: 0.80 | alpha: 0.100 | Pairs: 3864 | Steps/s: 2.50 | ETA: 11.3min
+  Step 8400/10000 | Loss: 2.6397 | p_mask: 0.96 | alpha: 0.100 | Pairs: 1532 | Steps/s: 2.50 | ETA: 10.7min
+  Step 8500/10000 | Loss: 2.7194 | p_mask: 0.58 | alpha: 0.100 | Pairs: 5791 | Steps/s: 2.50 | ETA: 10.0min
+  >>> Validation Loss: 2.8740 (best: 2.8682)
+  Step 8600/10000 | Loss: 2.6139 | p_mask: 0.52 | alpha: 0.100 | Pairs: 6234 | Steps/s: 2.50 | ETA: 9.3min
+  Step 8700/10000 | Loss: 2.5309 | p_mask: 0.77 | alpha: 0.100 | Pairs: 5494 | Steps/s: 2.50 | ETA: 8.7min
+  Step 8800/10000 | Loss: 2.5997 | p_mask: 0.80 | alpha: 0.100 | Pairs: 4493 | Steps/s: 2.50 | ETA: 8.0min
+  Step 8900/10000 | Loss: 2.5398 | p_mask: 0.98 | alpha: 0.100 | Pairs: 1086 | Steps/s: 2.50 | ETA: 7.3min
+  Step 9000/10000 | Loss: 2.6428 | p_mask: 0.65 | alpha: 0.100 | Pairs: 3897 | Steps/s: 2.50 | ETA: 6.7min
+  >>> Validation Loss: 2.8573 (best: 2.8682)
+  >>> New best model saved!
+  Step 9100/10000 | Loss: 2.5890 | p_mask: 0.38 | alpha: 0.100 | Pairs: 5169 | Steps/s: 2.50 | ETA: 6.0min
+  Step 9200/10000 | Loss: 2.5518 | p_mask: 0.96 | alpha: 0.100 | Pairs: 1231 | Steps/s: 2.50 | ETA: 5.3min
+  Step 9300/10000 | Loss: 2.6568 | p_mask: 0.53 | alpha: 0.100 | Pairs: 7368 | Steps/s: 2.50 | ETA: 4.7min
+  Step 9400/10000 | Loss: 2.6450 | p_mask: 0.94 | alpha: 0.100 | Pairs: 2173 | Steps/s: 2.50 | ETA: 4.0min
+  Step 9500/10000 | Loss: 2.6080 | p_mask: 0.67 | alpha: 0.100 | Pairs: 4996 | Steps/s: 2.50 | ETA: 3.3min
+  >>> Validation Loss: 2.9341 (best: 2.8573)
+  Step 9600/10000 | Loss: 2.5062 | p_mask: 0.40 | alpha: 0.100 | Pairs: 6377 | Steps/s: 2.50 | ETA: 2.7min
+  Step 9700/10000 | Loss: 2.4961 | p_mask: 0.61 | alpha: 0.100 | Pairs: 4031 | Steps/s: 2.50 | ETA: 2.0min
+  Step 9800/10000 | Loss: 2.5197 | p_mask: 0.77 | alpha: 0.100 | Pairs: 4581 | Steps/s: 2.50 | ETA: 1.3min
+  Step 9900/10000 | Loss: 2.6431 | p_mask: 0.82 | alpha: 0.100 | Pairs: 4273 | Steps/s: 2.50 | ETA: 0.7min
+  Step 10000/10000 | Loss: 2.5714 | p_mask: 0.91 | alpha: 0.100 | Pairs: 2494 | Steps/s: 2.50 | ETA: 0.0min
+  >>> Validation Loss: 2.8852 (best: 2.8573)
+
+Training complete. 10000 steps in 66.6 minutes.
+Best validation loss: 2.8573
+Models saved: amip_router_best.pt, amip_router_final.pt
+Loading tokenizer and base model...
+Router loaded from amip_router_best.pt
+
+Alpha schedule: alpha = 0.1 + 0.0 * p_mask
+  p=0.15 -> alpha=0.1000
+  p=0.50 -> alpha=0.1000
+  p=0.95 -> alpha=0.1000
+
+============================================================
+EVAL 1: Single-Step Mask Prediction Accuracy (p_mask=0.15)
+  alpha = 0.1000
+============================================================
+  Baseline: 0.7845
+  Router:   0.8081
+  Δ Acc:    +0.0236
+
+============================================================
+EVAL 2: Accuracy & Confidence by Mask Ratio
+============================================================
+  p=0.15 α=0.100 | Acc  Base:0.7343 Router:0.7606 Δ:+0.0263 | Conf Base:0.6565 Router:0.6915 Δ:+0.0350
+  p=0.30 α=0.100 | Acc  Base:0.6680 Router:0.6960 Δ:+0.0280 | Conf Base:0.5782 Router:0.6122 Δ:+0.0340
+  p=0.50 α=0.100 | Acc  Base:0.5159 Router:0.5524 Δ:+0.0364 | Conf Base:0.4192 Router:0.4551 Δ:+0.0359
+  p=0.70 α=0.100 | Acc  Base:0.3107 Router:0.3370 Δ:+0.0264 | Conf Base:0.2115 Router:0.2362 Δ:+0.0247
+  p=0.85 α=0.100 | Acc  Base:0.1354 Router:0.1691 Δ:+0.0337 | Conf Base:0.0780 Router:0.0975 Δ:+0.0194
+  p=0.95 α=0.100 | Acc  Base:0.0479 Router:0.0675 Δ:+0.0196 | Conf Base:0.0215 Router:0.0281 Δ:+0.0066
+
+============================================================
+EVAL 3: Logical Reasoning (temps=[0.0, 0.15, 0.3])
+============================================================
+
+  --- Temperature: 0.0 ---
+  Category        | Expected   | Baseline                       | Router                        
+  ------------------------------------------------------------------------------------------
+  Triple Swap     | banana     | ✗ cherry.                      | ✓ banana, bob has the cherry, 
+  Distractor      | copper     | ✓ copper coin.                 | ✓ copper coin and the blue bag
+  Relational      | building   | ✓ building.                    | ✓ building. the tallest object
+  State Swap      | ball       | ✓ ball.                        | ✓ ball and the box has the key
+  Score: Baseline 3/4 | Router 4/4
+
+  --- Temperature: 0.15 ---
+  Category        | Expected   | Baseline                       | Router                        
+  ------------------------------------------------------------------------------------------
+  Triple Swap     | banana     | ✗ cherry.                      | ✓ banana, bob has the cherry, 
+  Distractor      | copper     | ✓ copper coin.                 | ✓ copper coin and the blue bag
+  Relational      | building   | ✓ building.                    | ✓ building. the tallest object
+  State Swap      | ball       | ✓ ball.                        | ✓ ball and the box has the key
+  Score: Baseline 3/4 | Router 4/4
+
+  --- Temperature: 0.3 ---
+  Category        | Expected   | Baseline                       | Router                        
+  ------------------------------------------------------------------------------------------
+  Triple Swap     | banana     | ✗ cherry.                      | ✓ banana, bob has the cherry, 
+  Distractor      | copper     | ✓ copper coin.                 | ✓ copper coin and the blue bag
+  Relational      | building   | ✓ building.                    | ✓ building. the tallest object
+  State Swap      | ball       | ✓ ball.                        | ✓ ball and the box has the key
+  Score: Baseline 3/4 | Router 4/4
+
+============================================================
+EVAL 4: Generation Diversity (temps=[0.0, 0.15, 0.3], samples=5)
+============================================================
+
+  --- Temperature: 0.0 ---
+    [Baseline #1]: Once upon a time, there was a cat named Whiskers who loved to explore the librar...
+    [Baseline #2]: Once upon a time, there was a cat named Whiskers who loved to explore the librar...
+    [Baseline #3]: Once upon a time, there was a cat named Whiskers who loved to explore the librar...
+    [Baseline #4]: Once upon a time, there was a cat named Whiskers who loved to explore the librar...
+    [Baseline #5]: Once upon a time, there was a cat named Whiskers who loved to explore the librar...
+    [Baseline] Unique: 0.1724 | Jaccard: 1.0000
+    [Router #1]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router #2]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router #3]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router #4]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router #5]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router] Unique: 0.1429 | Jaccard: 1.0000
+
+  --- Temperature: 0.15 ---
+    [Baseline #1]: Once upon a time, there was a cat named Whiskers who loved to explore the librar...
+    [Baseline #2]: Once upon a time, there was a cat named Whiskers who loved to explore the world....
+    [Baseline #3]: One day, a curious cat named Whiskers stumbled upon a magical portal in the libr...
+    [Baseline #4]: Once upon a time, there was a cat named Whiskers who loved to explore the librar...
+    [Baseline #5]: Once upon a time, there was a cat named Whiskers who loved to explore the world....
+    [Baseline] Unique: 0.2746 | Jaccard: 0.6117
+    [Router #1]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router #2]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router #3]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router #4]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router #5]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router] Unique: 0.1898 | Jaccard: 0.7336
+
+  --- Temperature: 0.3 ---
+    [Baseline #1]: One day, a curious cat named Whiskers stumbled upon a magical portal in the libr...
+    [Baseline #2]: Once upon a time, there was a cat named Whiskers who loved to explore the world....
+    [Baseline #3]: One day, a curious cat named Whiskers stumbled upon a magical portal in the libr...
+    [Baseline #4]: One day, a curious cat named Whiskers stumbled upon a magical portal in the libr...
+    [Baseline #5]: Once upon a time, there was a cat named Whiskers who loved to explore the world....
+    [Baseline] Unique: 0.2941 | Jaccard: 0.5469
+    [Router #1]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router #2]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router #3]: Once upon a time , there was a cat named Whiskers who lived in a small town . On...
+    [Router #4]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router #5]: Once upon a time , there was a cat named Whiskers who loved to explore the libra...
+    [Router] Unique: 0.2684 | Jaccard: 0.5453
+
+  Stories saved to generated_stories.txt
+
+============================================================
+EVAL 5: Entropy Across Denoising Steps
+============================================================
+  Sample 1/3
+  Sample 2/3
+  Sample 3/3
+  Mean Base Entropy:   4.7305
+  Mean Router Entropy: 4.8572
+  Entropy plot saved to entropy_curve.png
+
+============================================================
+EVAL 6: Distribution Flatness
+============================================================
+  [Baseline] Entropy: 0.0015 | Normalized: 0.0006
+    P(1) = 0.0000
+    P(2) = 0.0000
+    P(3) = 0.0000
+    P(4) = 0.0000
+    P(5) = 0.0000
+    P(6) = 0.0000
+    P(7) = 0.0000
+    P(8) = 0.0000
+    P(9) = 0.0000
+    P(10) = 0.0000
+  [Router] Entropy: 0.0027 | Normalized: 0.0012
+    P(1) = 0.0000
+    P(2) = 0.0000
+    P(3) = 0.0000
+    P(4) = 0.0000
+    P(5) = 0.0000
+    P(6) = 0.0000
+    P(7) = 0.0000
+    P(8) = 0.0000
+    P(9) = 0.0000
+    P(10) = 0.0000
+  Flatness plot saved to flatness.png
+
+============================================================
+EVAL 7: GSM8K End-to-End Accuracy (n=100)
+============================================================
+  [Baseline] Q1 ✓ | Gold: 18 | Pred: 18
+    Response: To determine how much money Janet makes every day at the farmers' market, we need to follow these steps:
+
+1. Calculate the total number of eggs laid b...
+  [Router] Q1 ✓ | Gold: 18 | Pred: 18
+    Response: To determine how much money Janet makes every day at the farmers' market, we need to follow these steps:
+
+1. Calculate the total number of eggs laid b...
+  [Baseline] Q2 ✗ | Gold: 3 | Pred: 3.
+    Response: To determine the total number of bolts required for the robe, we need to add the bolts of blue fiber and the bolts of white fiber.
+
+1. The robe takes ...
+  [Router] Q2 ✗ | Gold: 3 | Pred: 1
+    Response: To determine the total number of bolts required for the robe, we need to add the bolts of blue fiber and the bolts of white fiber together.
+
+1. The ro...
+  [Baseline] Q3 ✗ | Gold: 70000 | Pred: 40000
+  [Router] Q3 ✗ | Gold: 70000 | Pred: 000
+  [Baseline] Q4 ✓ | Gold: 540 | Pred: 540
+  [Router] Q4 ✓ | Gold: 540 | Pred: 540
+  [Baseline] Q5 ✓ | Gold: 20 | Pred: 20
+  [Router] Q5 ✓ | Gold: 20 | Pred: 20
+  Progress 10/100 | Baseline: 0.6000
+  Progress 10/100 | Router: 0.6000
+  Progress 20/100 | Baseline: 0.6500
+  Progress 20/100 | Router: 0.5500
+  Progress 30/100 | Baseline: 0.5667
+  Progress 30/100 | Router: 0.5333
+  Progress 40/100 | Baseline: 0.5750
+  Progress 40/100 | Router: 0.5750
+  Progress 50/100 | Baseline: 0.6200
+  Progress 50/100 | Router: 0.5400
+  Progress 60/100 | Baseline: 0.6500
+  Progress 60/100 | Router: 0.5500
+  Progress 70/100 | Baseline: 0.6571
+  Progress 70/100 | Router: 0.5429
+  Progress 80/100 | Baseline: 0.6625
+  Progress 80/100 | Router: 0.5625
+  Progress 90/100 | Baseline: 0.6667
+  Progress 90/100 | Router: 0.5556
+  Progress 100/100 | Baseline: 0.6900
+  Progress 100/100 | Router: 0.5600
+
+  Baseline GSM8K Accuracy: 0.6900 (69/100)
+
+  Router GSM8K Accuracy: 0.5600 (56/100)
+
+============================================================
+EVAL 8: MATH End-to-End Accuracy (n=50)
+============================================================
+  [Baseline] Q1 ✓ | Gold: 2 | Pred: 2
+    Response: To determine the number of vertical asymptotes of the function \( y = \frac{2}{x^2 + x - 6} \), we need to identify the values of \( x \) that make th...
+  [Router] Q1 ✓ | Gold: 2 | Pred: 2
+    Response: To find the vertical asymptotes of the function \( y = \frac{2}{x^2 + x - 6} \), we need to determine the values of \( x \) that make the denominator ...
+  [Baseline] Q2 ✓ | Gold: 10 | Pred: 10
+    Response: To find the positive difference between $120\%$ of 30 and $130\%$ of 20, we will follow these steps:
+
+1. Calculate $120\%$ of 30.
+2. Calculate $130\%$...
+  [Router] Q2 ✓ | Gold: 10 | Pred: 10
+    Response: First, we need to find $120\%$ of 30 and $130\%$ of 20.
+
+1. Calculate $120\%$ of 30:
+   \[
+   120\% \text{ of } 30 = \frac{120}{100} \times 30 = 1.2 \...
+  [Baseline] Q3 ✗ | Gold: \dfrac{9}{7} | Pred: \dfrac{2}{7}
+  [Router] Q3 ✓ | Gold: \dfrac{9}{7} | Pred: \dfrac{9}{7}
+  Progress 10/50 | Baseline: 0.6000
+  Progress 10/50 | Router: 0.6000
+  Progress 20/50 | Baseline: 0.6500
+  Progress 20/50 | Router: 0.6500
+  Progress 30/50 | Baseline: 0.5333
+  Progress 30/50 | Router: 0.5667
+  Progress 40/50 | Baseline: 0.4750
+  Progress 40/50 | Router: 0.5250
+  Progress 50/50 | Baseline: 0.4600
+  Progress 50/50 | Router: 0.5000
+
+  Baseline MATH Accuracy: 0.4600 (23/50)
+
+  Router MATH Accuracy: 0.5000 (25/50)
+  Sweep summary plot saved to sweep_summary.png
+
+================================================================================
+COMPLETE EVALUATION SUMMARY
+  Alpha schedule: 0.1 + 0.0 * p_mask
+================================================================================
+
+  1. Mask Prediction Accuracy (single-step, p=0.15)
+     Baseline: 0.7845  |  Router: 0.8081  |  Δ: +0.0236
+
+  2. Mask Accuracy by Ratio
+     p_mask   | α      | Base Acc   | Router Acc   | Δ Acc      | Δ Conf    
+     --------------------------------------------------------------
+     0.15     | 0.100  | 0.7343     | 0.7606       | +0.0263    | +0.0350   
+     0.30     | 0.100  | 0.6680     | 0.6960       | +0.0280    | +0.0340   
+     0.50     | 0.100  | 0.5159     | 0.5524       | +0.0364    | +0.0359   
+     0.70     | 0.100  | 0.3107     | 0.3370       | +0.0264    | +0.0247   
+     0.85     | 0.100  | 0.1354     | 0.1691       | +0.0337    | +0.0194   
+     0.95     | 0.100  | 0.0479     | 0.0675       | +0.0196    | +0.0066   
+
+  3. Logical Reasoning Accuracy
+     Temp     | Baseline   | Router     | Δ         
+     ------------------------------------------
+     0.0      | 0.7500     | 1.0000     | +0.2500   
+     0.15     | 0.7500     | 1.0000     | +0.2500   
+     0.3      | 0.7500     | 1.0000     | +0.2500   
+
+  4. Diversity (Jaccard Similarity — lower is more diverse)
+     Temp     | Base Jaccard   | Router Jaccard   | Base Unique    | Router Unique 
+     ----------------------------------------------------------------------
+     0.0      | 1.0000         | 1.0000           | 0.1724         | 0.1429        
+     0.15     | 0.6117         | 0.7336           | 0.2746         | 0.1898        
+     0.3      | 0.5469         | 0.5453           | 0.2941         | 0.2684        
+
+  5. Entropy Across Denoising Steps
+     Mean Base: 4.7305  |  Mean Router: 4.8572  |  Δ: +0.1268
+
+  6. Distribution Flatness (normalized entropy, 1.0 = uniform)
+     Baseline: 0.0006  |  Router: 0.0012
+
+  7. GSM8K End-to-End Accuracy
+     Baseline: 0.6900 (69/100)
+     Router:   0.5600 (56/100)
+
+  8. MATH End-to-End Accuracy
+     Baseline: 0.4600 (23/50)
+     Router:   0.5000 (25/50)
+
+================================================================================
+Results saved to eval_results.json
+Plots saved: entropy_curve.png, flatness.png, sweep_summary.png
+Stories saved: generated_stories.txt

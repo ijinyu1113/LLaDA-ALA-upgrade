@@ -1,32 +1,88 @@
 {
   "mask_accuracy": {
-    "base_acc": 0.7276264591439688,
-    "router_acc": 0.7509727626459144
+    "base_acc": 0.7492063492063492,
+    "router_acc": 0.765079365079365
   },
+  "mask_accuracy_by_ratio": [
+    {
+      "p_mask": 0.15,
+      "alpha": 0.05,
+      "base_acc": 0.7172236503856041,
+      "router_acc": 0.7249357326478149,
+      "base_conf": 0.6455655526992288,
+      "router_conf": 0.660658338688946,
+      "n_tokens": 778
+    },
+    {
+      "p_mask": 0.3,
+      "alpha": 0.05,
+      "base_acc": 0.6410081743869209,
+      "router_acc": 0.6641689373297003,
+      "base_conf": 0.5650757833787466,
+      "router_conf": 0.5880556028610354,
+      "n_tokens": 1468
+    },
+    {
+      "p_mask": 0.5,
+      "alpha": 0.05,
+      "base_acc": 0.5243288590604027,
+      "router_acc": 0.5444630872483222,
+      "base_conf": 0.42291710360738255,
+      "router_conf": 0.44364775587248323,
+      "n_tokens": 2384
+    },
+    {
+      "p_mask": 0.7,
+      "alpha": 0.05,
+      "base_acc": 0.27519491770141497,
+      "router_acc": 0.29309846953508517,
+      "base_conf": 0.18477476176725383,
+      "router_conf": 0.2003975057753393,
+      "n_tokens": 3463
+    },
+    {
+      "p_mask": 0.85,
+      "alpha": 0.05,
+      "base_acc": 0.11584490186692198,
+      "router_acc": 0.1393011010052657,
+      "base_conf": 0.06620850661201531,
+      "router_conf": 0.07698622247486836,
+      "n_tokens": 4178
+    },
+    {
+      "p_mask": 0.95,
+      "alpha": 0.05,
+      "base_acc": 0.04596460940871817,
+      "router_acc": 0.06042296072507553,
+      "base_conf": 0.020268413492662927,
+      "router_conf": 0.02399785383847648,
+      "n_tokens": 4634
+    }
+  ],
   "logical_reasoning": [
     {
       "temp": 0.0,
       "base_correct": 3,
-      "router_correct": 4,
+      "router_correct": 3,
       "total": 4,
       "base_acc": 0.75,
-      "router_acc": 1.0
+      "router_acc": 0.75
     },
     {
       "temp": 0.15,
       "base_correct": 3,
-      "router_correct": 4,
+      "router_correct": 3,
       "total": 4,
       "base_acc": 0.75,
-      "router_acc": 1.0
+      "router_acc": 0.75
     },
     {
       "temp": 0.3,
       "base_correct": 3,
-      "router_correct": 4,
+      "router_correct": 3,
       "total": 4,
       "base_acc": 0.75,
-      "router_acc": 1.0
+      "router_acc": 0.75
     }
   ],
   "diversity": [
@@ -37,36 +93,36 @@
         "jaccard": 1.0
       },
       "Router": {
-        "unique_ratio": 0.14339622641509434,
+        "unique_ratio": 0.184,
         "jaccard": 1.0
       }
     },
     {
       "temp": 0.15,
       "Baseline": {
-        "unique_ratio": 0.1724137931034483,
-        "jaccard": 1.0
+        "unique_ratio": 0.2746478873239437,
+        "jaccard": 0.6116993464052288
       },
       "Router": {
-        "unique_ratio": 0.12857142857142856,
-        "jaccard": 1.0
+        "unique_ratio": 0.24427480916030533,
+        "jaccard": 0.7236986074270557
       }
     },
     {
       "temp": 0.3,
       "Baseline": {
-        "unique_ratio": 0.16153846153846155,
-        "jaccard": 1.0
+        "unique_ratio": 0.29411764705882354,
+        "jaccard": 0.5469109934327326
       },
       "Router": {
-        "unique_ratio": 0.14814814814814814,
-        "jaccard": 1.0
+        "unique_ratio": 0.31343283582089554,
+        "jaccard": 0.5369799507730542
       }
     }
   ],
   "entropy": {
     "mean_base": 4.730497190728784,
-    "mean_router": 5.616046806797385
+    "mean_router": 4.661234173923731
   },
   "flatness": {
     "Baseline": {
@@ -74,19 +130,31 @@
       "normalized_entropy": 0.000633976688148285
     },
     "Router": {
-      "entropy": 0.0020195478573441505,
-      "normalized_entropy": 0.0008770784903841001
+      "entropy": 0.002142848214134574,
+      "normalized_entropy": 0.0009306271549548831
     }
   },
   "gsm8k": {
     "Baseline": {
-      "accuracy": 0.62,
-      "correct": 31,
+      "accuracy": 0.75,
+      "correct": 75,
+      "total": 100
+    },
+    "Router": {
+      "accuracy": 0.82,
+      "correct": 82,
+      "total": 100
+    }
+  },
+  "math": {
+    "Baseline": {
+      "accuracy": 0.46,
+      "correct": 23,
       "total": 50
     },
     "Router": {
-      "accuracy": 0.6,
-      "correct": 30,
+      "accuracy": 0.5,
+      "correct": 25,
       "total": 50
     }
   }

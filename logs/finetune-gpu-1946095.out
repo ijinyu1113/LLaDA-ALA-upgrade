@@ -1,0 +1,83 @@
+=========================================
+JOB 1946095 on gh128.hsn.cm.delta.internal.ncsa.edu
+NVIDIA GH200 120GB, 97871 MiB, 570.172.08
+PyTorch 2.5.1
+Transformers 4.36.2
+CUDA 12.4
+GPU: NVIDIA GH200 120GB
+BF16 supported? True
+=========================================
+Loading model...
+Router loaded from amip_router_best.pt
+
+Running baseline on 50 GSM8K samples...
+  Baseline progress: 10/50 | 7/10
+  Baseline progress: 20/50 | 15/20
+  Baseline progress: 30/50 | 19/30
+  Baseline progress: 40/50 | 27/40
+  Baseline progress: 50/50 | 35/50
+Baseline: 0.7000 (35/50)
+
+Sweeping alpha=0.05...
+  alpha=0.05 progress: 10/50 | 7/10
+  alpha=0.05 progress: 20/50 | 16/20
+  alpha=0.05 progress: 30/50 | 22/30
+  alpha=0.05 progress: 40/50 | 32/40
+  alpha=0.05 progress: 50/50 | 40/50
+  alpha=0.05: 0.8000 (40/50)
+
+Sweeping alpha=0.10...
+  alpha=0.10 progress: 10/50 | 6/10
+  alpha=0.10 progress: 20/50 | 13/20
+  alpha=0.10 progress: 30/50 | 19/30
+  alpha=0.10 progress: 40/50 | 28/40
+  alpha=0.10 progress: 50/50 | 35/50
+  alpha=0.10: 0.7000 (35/50)
+
+Sweeping alpha=0.15...
+  alpha=0.15 progress: 10/50 | 6/10
+  alpha=0.15 progress: 20/50 | 11/20
+  alpha=0.15 progress: 30/50 | 17/30
+  alpha=0.15 progress: 40/50 | 22/40
+  alpha=0.15 progress: 50/50 | 28/50
+  alpha=0.15: 0.5600 (28/50)
+
+Sweeping alpha=0.20...
+  alpha=0.20 progress: 10/50 | 1/10
+  alpha=0.20 progress: 20/50 | 3/20
+  alpha=0.20 progress: 30/50 | 7/30
+  alpha=0.20 progress: 40/50 | 13/40
+  alpha=0.20 progress: 50/50 | 17/50
+  alpha=0.20: 0.3400 (17/50)
+
+Sweeping alpha=0.30...
+  alpha=0.30 progress: 10/50 | 1/10
+  alpha=0.30 progress: 20/50 | 1/20
+  alpha=0.30 progress: 30/50 | 3/30
+  alpha=0.30 progress: 40/50 | 3/40
+  alpha=0.30 progress: 50/50 | 3/50
+  alpha=0.30: 0.0600 (3/50)
+
+Sweeping alpha=0.50...
+  alpha=0.50 progress: 10/50 | 0/10
+  alpha=0.50 progress: 20/50 | 0/20
+  alpha=0.50 progress: 30/50 | 1/30
+  alpha=0.50 progress: 40/50 | 2/40
+  alpha=0.50 progress: 50/50 | 3/50
+  alpha=0.50: 0.0600 (3/50)
+
+============================================================
+ALPHA SWEEP SUMMARY (GSM8K, n=50)
+============================================================
+  Alpha    | Accuracy   | Correct/Total   | vs Baseline
+  -------------------------------------------------------
+  base     | 0.7000     | 35/50            | ---
+  0.05     | 0.8000     | 40/50            | +0.1000
+  0.10     | 0.7000     | 35/50            | +0.0000
+  0.15     | 0.5600     | 28/50            | -0.1400
+  0.20     | 0.3400     | 17/50            | -0.3600
+  0.30     | 0.0600     | 3/50            | -0.6400
+  0.50     | 0.0600     | 3/50            | -0.6400
+============================================================
+
+Best alpha: 0.05 (0.8000)
