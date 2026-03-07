@@ -1,0 +1,76 @@
+=========================================
+JOB 1946914 on gh035.hsn.cm.delta.internal.ncsa.edu
+NVIDIA GH200 120GB, 97871 MiB, 570.172.08
+PyTorch 2.5.1
+Transformers 4.36.2
+CUDA 12.4
+GPU: NVIDIA GH200 120GB
+BF16 supported? True
+=========================================
+Loading model...
+Router loaded from amip_router_best.pt
+
+============================================================
+EXPERIMENT 1: Cosine Similarity vs Mask Ratio
+============================================================
+  p_mask   | Base CosSim    | Router CosSim  | Δ         
+  ----------------------------------------------------
+  0.15     | 0.3495         | 0.3787         | +0.0292   
+  0.30     | 0.3700         | 0.4031         | +0.0331   
+  0.50     | 0.4025         | 0.4408         | +0.0383   
+  0.70     | 0.5341         | 0.5716         | +0.0376   
+  0.85     | 0.6603         | 0.6910         | +0.0307   
+  0.95     | 0.8469         | 0.8549         | +0.0080   
+
+  Plot saved: cosine_sim_by_mask_ratio.png
+
+============================================================
+EXPERIMENT 2: Cosine Similarity by Layer (p_mask=0.85)
+============================================================
+  Layer 0  (embedding): 1.0000
+  Layer 16 (mid):       0.7549
+  Layer -1 (final):     0.6210
+  Router corrected:     0.6584  <- after ALA
+  Plot saved: cosine_sim_by_layer.png
+
+Running two-panel experiment...
+
+============================================================
+EXPERIMENT 3: Two-Panel (Pairwise + Alignment)
+============================================================
+  Running p_mask=0.15... done
+  Running p_mask=0.30... done
+  Running p_mask=0.50... done
+  Running p_mask=0.70... done
+  Running p_mask=0.85... done
+  Running p_mask=0.95... done
+
+  p_mask   |   Pairwise Δ |   Alignment Δ
+  --------------------------------------
+  0.15     |      +0.0300 |       -0.0021
+  0.30     |      +0.0324 |       -0.0019
+  0.50     |      +0.0358 |       -0.0013
+  0.70     |      +0.0362 |       -0.0006
+  0.85     |      +0.0283 |       +0.0010
+  0.95     |      +0.0067 |       +0.0012
+  Saved: two_panel_symmetry_vs_alignment.png
+
+============================================================
+SUMMARY
+============================================================
+  Alpha: 0.05 + 0.0 * p_mask
+
+  p_mask   |   Pairwise Δ |   Alignment Δ
+  --------------------------------------
+  0.15     |      +0.0300 |       -0.0021
+  0.30     |      +0.0324 |       -0.0019
+  0.50     |      +0.0358 |       -0.0013
+  0.70     |      +0.0362 |       -0.0006
+  0.85     |      +0.0283 |       +0.0010
+  0.95     |      +0.0067 |       +0.0012
+
+  Interpretation:
+  Pairwise delta ~ 0 -> ALA does not alter global hidden state geometry
+  Alignment delta > 0 -> ALA pushes each position toward the correct token
+
+Done. Plots saved.

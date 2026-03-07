@@ -1,0 +1,20 @@
+Using CC = cc 
+Using CXX = CC 
+Using FC = ftn 
+Using F77 = ftn 
+Using F90 = ftn 
+Lmod has detected the following error: These module(s) or extension(s) exist
+but cannot be loaded as requested: "gcc"
+   Try: "module spider gcc" to see how to load the module(s).
+
+
+
+/u/iyu1/.conda/envs/nim-env/lib/python3.10/site-packages/transformers/utils/generic.py:441: FutureWarning: `torch.utils._pytree._register_pytree_node` is deprecated. Please use `torch.utils._pytree.register_pytree_node` instead.
+  _torch_pytree._register_pytree_node(
+gpu-bind: usable_gres=0x1; bit_alloc=0x4; local_inx=1; global_list=2; local_list=0
+/u/iyu1/.conda/envs/nim-env/bin/python3: can't open file '/u/iyu1/nim_game_project/llada/mech-interp.py': [Errno 2] No such file or directory
+srun: error: gh010: task 0: Exited with exit code 2
+
+real	0m0.139s
+user	0m0.008s
+sys	0m0.008s
