@@ -10,7 +10,7 @@
 #SBATCH --mem=80G
 #SBATCH --gpus-per-node=1
 #SBATCH --gpu-bind=verbose,closest
-#SBATCH --time=8:00:00
+#SBATCH --time=24:00:00
 
 export OMP_NUM_THREADS=16
 export OPENBLAS_NUM_THREADS=16
@@ -53,5 +53,6 @@ print(f'BF16 supported? {torch.cuda.is_bf16_supported()}')
 echo "========================================="
 
 #time srun python3 /u/iyu1/nim_game_project/llada/train_router.py && \
-time srun python3 /u/iyu1/nim_game_project/llada/attention_analysis.py
+#time srun python3 /u/iyu1/nim_game_project/llada/attention_analysis.py
+time srun python3 /u/iyu1/nim_game_project/llada/run_benchmarks.py --benchmarks arc math gsm8k --resume --save-every 50
 
