@@ -1,17 +1,17 @@
 """
 Mechanistic Interpretability Experiments
 =========================================
-Three experiments measuring how ALA corrects masked-position hidden states:
+Three experiments measuring how ALA affects masked-position hidden states:
 
   1. Cosine Similarity vs Mask Ratio
-     Pairwise cosine sim among masked positions — shows collapse at high mask ratios.
+     Pairwise cosine sim among masked positions — shows ALA increases cohesion.
 
   2. Cosine Similarity by Layer
-     Layer-by-layer pairwise cosine sim at p=0.85 — shows where collapse occurs.
+     Layer-by-layer pairwise cosine sim at p=0.85 — shows similarity progression.
 
   3. Token Alignment + Two-Panel Figure
-     cos(h, W_out[correct_token]) — shows ALA nudges hidden states toward
-     the correct token embedding WITHOUT altering global geometry.
+     cos(h, W_out[correct_token]) — shows ALA increases cohesion WITHOUT
+     improving ground-truth alignment (mechanism is at logit level, not representation level).
 
 Produces:
   cosine_sim_by_mask_ratio.png   — Experiment 1
@@ -298,7 +298,7 @@ def plot_cosine_by_mask_ratio(mask_ratios, base_sims, router_sims,
     ax.axhline(y=1.0, color='gray', linestyle='--', alpha=0.4, label='Perfect collapse (1.0)')
     ax.set_xlabel('Mask Ratio (p_mask)', fontsize=12)
     ax.set_ylabel('Mean Pairwise Cosine Similarity', fontsize=12)
-    ax.set_title('Hidden State Collapse at Masked Positions\n(higher = more collapsed)', fontsize=12)
+    ax.set_title('Pairwise Cosine Similarity at Masked Positions\n(higher = more similar)', fontsize=12)
     ax.legend()
     ax.grid(True, alpha=0.3)
     ax.set_ylim(0.5, 1.05)
@@ -311,7 +311,7 @@ def plot_cosine_by_mask_ratio(mask_ratios, base_sims, router_sims,
     ax2.axhline(y=0, color='black', linewidth=0.8)
     ax2.set_xlabel('Mask Ratio (p_mask)', fontsize=12)
     ax2.set_ylabel('Delta Cosine Similarity (Router - Base)', fontsize=12)
-    ax2.set_title('ALA Differentiation Effect\n(negative = less collapse = better)', fontsize=12)
+    ax2.set_title('ALA Cohesion Effect\n(positive = more cohesive hidden states)', fontsize=12)
     ax2.grid(True, alpha=0.3, axis='y')
     for bar, d in zip(bars, deltas):
         ax2.text(bar.get_x() + bar.get_width()/2, d - 0.001 if d < 0 else d + 0.001,
@@ -353,7 +353,7 @@ def plot_cosine_by_layer(avg_layer_sims, avg_router_final,
     ax.set_xlabel('Transformer Layer', fontsize=12)
     ax.set_ylabel('Mean Pairwise Cosine Similarity', fontsize=12)
     ax.set_title(
-        f'Symmetry Breaking Across Layers (p_mask={p_mask})\n'
+        f'Pairwise Cosine Similarity Across Layers (p_mask={p_mask})\n'
         f'Layer 0 = embedding output; Layer {len(layers)-1} = final hidden state',
         fontsize=12)
     ax.legend(fontsize=10)
@@ -393,7 +393,7 @@ def plot_two_panel(agg, mask_ratios,
     ax1.set_ylim(0.0, 1.05)
 
     mid = len(mask_ratios) // 2
-    ax1.annotate('ALA does not alter\nglobal geometry',
+    ax1.annotate('ALA increases cohesion\n(shared anchors → similar corrections)',
                  xy=(mask_ratios[mid], pw_router[mid]),
                  xytext=(mask_ratios[mid] + 0.05, pw_router[mid] - 0.15),
                  fontsize=8, color='gray',
@@ -414,7 +414,7 @@ def plot_two_panel(agg, mask_ratios,
     ax2.set_xticks(mask_ratios)
 
     plt.suptitle(
-        'ALA corrects prediction direction without altering global geometry',
+        'ALA increases representation cohesion without improving ground-truth alignment',
         fontsize=11, y=1.02)
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')

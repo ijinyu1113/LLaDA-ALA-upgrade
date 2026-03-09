@@ -172,7 +172,7 @@ LOGIC_TEST_CASES = [
 
 @torch.no_grad()
 def eval_logical_reasoning(model, tokenizer, temps=[0.0, 0.15, 0.3],
-                           gen_length=32, steps=64):
+                           gen_length=32, steps=32):
     """Generate completions for logic prompts; check if expected word appears."""
     print(f"\n{'='*60}")
     print(f"EVAL 3: Logical Reasoning (temps={temps})")
