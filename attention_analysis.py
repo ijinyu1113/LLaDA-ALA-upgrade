@@ -500,6 +500,224 @@ def experiment_ala_vs_attention(model, tokenizer,
 
 
 # ============================================================
+# EXPERIMENT E: Anchor Availability Analysis
+# ============================================================
+
+@torch.no_grad()
+def experiment_anchor_availability(model, tokenizer,
+                                     mask_ratios=None,
+                                     num_samples=30,
+                                     max_length=128):
+    """For each masked position, count anchors (unmasked tokens within r=10)
+    and record whether ALA flips the prediction from wrong to right.
+
+    Bins by anchor count to test: does ALA help more when more local
+    context is available? This controls for the ceiling-effect argument
+    that Table 2 could be explained by baseline difficulty alone."""
+
+    if mask_ratios is None:
+        mask_ratios = [0.50, 0.70, 0.85, 0.95]
+
+    print("\n" + "=" * 60)
+    print("EXPERIMENT E: Anchor Availability Analysis")
+    print("=" * 60)
+
+    dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
+    texts = [t for t in dataset["text"][:500] if len(t) > 80][:num_samples]
+
+    all_anchor_counts = []
+    all_base_correct = []
+    all_router_correct = []
+    all_mask_ratios = []
+
+    for p_mask in mask_ratios:
+        print(f"  p_mask={p_mask:.2f}...", end=" ", flush=True)
+        alpha = ALPHA_BASE + ALPHA_SCALE * p_mask
+
+        for text in texts:
+            ids = tokenizer(text, return_tensors="pt",
+                            truncation=True, max_length=max_length)["input_ids"].to(model.device)
+            original = ids.clone()
+            masked, mask_locs = apply_mask(ids, p_mask, model.device)
+
+            mask_positions = mask_locs[0].nonzero(as_tuple=True)[0].cpu()
+            unmasked_positions = (~mask_locs[0]).nonzero(as_tuple=True)[0].cpu()
+
+            if len(mask_positions) < 2 or len(unmasked_positions) < 1:
+                continue
+
+            # Base forward pass
+            base_outputs = model.base_model(masked, output_hidden_states=True)
+            base_logits = base_outputs.logits
+            base_preds = base_logits.argmax(dim=-1)
+
+            # Router forward pass
+            h_L = base_outputs.hidden_states[-1].to(torch.bfloat16)
+            m_idx = [mask_positions.to(model.device)]
+            u_idx = [unmasked_positions.to(model.device)]
+            delta = model.router(h_L, m_idx, u_idx)
+            h_blended = h_L + alpha * delta
+
+            router_logits = model.base_model.model.transformer.ff_out(h_blended)
+            if model.base_model.model.config.scale_logits:
+                router_logits *= 1.0 / math.sqrt(model.base_model.model.config.d_model)
+            router_preds = router_logits.argmax(dim=-1)
+
+            # For each masked position, count anchors within r
+            unmasked_set = set(unmasked_positions.tolist())
+            for m_pos in mask_positions:
+                m = m_pos.item()
+                anchor_count = sum(
+                    1 for u in unmasked_set if 0 < abs(u - m) <= RANGE_R
+                )
+                gold = original[0, m].item()
+                base_hit = (base_preds[0, m].item() == gold)
+                router_hit = (router_preds[0, m].item() == gold)
+
+                all_anchor_counts.append(anchor_count)
+                all_base_correct.append(int(base_hit))
+                all_router_correct.append(int(router_hit))
+                all_mask_ratios.append(p_mask)
+
+        print("done")
+
+    all_anchor_counts = np.array(all_anchor_counts)
+    all_base_correct = np.array(all_base_correct)
+    all_router_correct = np.array(all_router_correct)
+    all_mask_ratios = np.array(all_mask_ratios)
+
+    ala_flipped = (~all_base_correct.astype(bool)) & all_router_correct.astype(bool)
+    ala_regressed = all_base_correct.astype(bool) & (~all_router_correct.astype(bool))
+
+    # --- Summary by anchor count ---
+    unique_counts = sorted(np.unique(all_anchor_counts))
+    print(f"\n  {'Anchors':<10} | {'Base Acc':>10} | {'Router Acc':>12} | "
+          f"{'Correction':>12} | {'Regression':>12} | {'Delta Acc':>10} | {'Count':>8}")
+    print(f"  {'-'*82}")
+
+    bin_anchor_counts = []
+    bin_base_acc = []
+    bin_router_acc = []
+    bin_delta_acc = []
+    bin_correction_rate = []
+    bin_regression_rate = []
+    bin_counts = []
+
+    for ac in unique_counts:
+        in_bin = all_anchor_counts == ac
+        n = int(in_bin.sum())
+        if n < 10:  # skip tiny bins
+            continue
+
+        b_acc = all_base_correct[in_bin].mean()
+        r_acc = all_router_correct[in_bin].mean()
+        corr = ala_flipped[in_bin].mean()
+        reg = ala_regressed[in_bin].mean()
+
+        bin_anchor_counts.append(ac)
+        bin_base_acc.append(b_acc)
+        bin_router_acc.append(r_acc)
+        bin_delta_acc.append(r_acc - b_acc)
+        bin_correction_rate.append(corr)
+        bin_regression_rate.append(reg)
+        bin_counts.append(n)
+
+        print(f"  {ac:<10} | {b_acc:>10.4f} | {r_acc:>12.4f} | "
+              f"{corr:>12.4f} | {reg:>12.4f} | {r_acc - b_acc:>+10.4f} | {n:>8}")
+
+    # --- Summary by mask ratio (with avg anchor count) ---
+    print(f"\n  {'p_mask':<8} | {'Avg Anchors':>12} | {'Base Acc':>10} | "
+          f"{'Router Acc':>12} | {'Delta':>8}")
+    print(f"  {'-'*56}")
+    for p in mask_ratios:
+        in_p = all_mask_ratios == p
+        avg_anc = all_anchor_counts[in_p].mean()
+        b_acc = all_base_correct[in_p].mean()
+        r_acc = all_router_correct[in_p].mean()
+        print(f"  {p:<8.2f} | {avg_anc:>12.1f} | {b_acc:>10.4f} | "
+              f"{r_acc:>12.4f} | {r_acc - b_acc:>+8.4f}")
+
+    return {
+        "bin_anchor_counts": bin_anchor_counts,
+        "bin_base_acc": bin_base_acc,
+        "bin_router_acc": bin_router_acc,
+        "bin_delta_acc": bin_delta_acc,
+        "bin_correction_rate": bin_correction_rate,
+        "bin_regression_rate": bin_regression_rate,
+        "bin_counts": bin_counts,
+        "all_anchor_counts": all_anchor_counts,
+        "all_base_correct": all_base_correct,
+        "all_router_correct": all_router_correct,
+        "all_mask_ratios": all_mask_ratios,
+    }
+
+
+def plot_anchor_availability(anchor_results, save_path="anchor_availability.png"):
+    """2-panel figure: (a) correction rate vs anchor count, (b) delta accuracy vs anchor count."""
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+
+    counts = anchor_results["bin_anchor_counts"]
+    correction = anchor_results["bin_correction_rate"]
+    regression = anchor_results["bin_regression_rate"]
+    delta_acc = anchor_results["bin_delta_acc"]
+    base_acc = anchor_results["bin_base_acc"]
+    n_bins = anchor_results["bin_counts"]
+
+    # --- Panel (a): Correction rate vs anchor count ---
+    ax1 = axes[0]
+    x = np.arange(len(counts))
+    width = 0.35
+    ax1.bar(x - width/2, correction, width, label='Corrections (wrong→right)',
+            color='#2ca02c', alpha=0.8)
+    ax1.bar(x + width/2, regression, width, label='Regressions (right→wrong)',
+            color='#d62728', alpha=0.8)
+    ax1.set_xlabel('Number of Anchors (unmasked tokens within r=10)', fontsize=11)
+    ax1.set_ylabel('Rate', fontsize=11)
+    ax1.set_title('(a) ALA Correction Rate vs. Anchor Count', fontsize=11)
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(counts)
+    ax1.legend(fontsize=9)
+    ax1.grid(True, alpha=0.3, axis='y')
+
+    # Annotate counts
+    for i, (bar_x, n) in enumerate(zip(x, n_bins)):
+        ax1.text(bar_x, max(correction[i], regression[i]) + 0.005,
+                 f'n={n}', ha='center', va='bottom', fontsize=7, color='gray')
+
+    # --- Panel (b): Delta accuracy vs anchor count ---
+    ax2 = axes[1]
+    colors = ['#d62728' if d < 0 else '#2ca02c' for d in delta_acc]
+    bars = ax2.bar(x, delta_acc, 0.6, color=colors, alpha=0.8)
+    ax2.axhline(0, color='black', linewidth=0.5)
+    ax2.set_xlabel('Number of Anchors (unmasked tokens within r=10)', fontsize=11)
+    ax2.set_ylabel('Accuracy Improvement (Router − Base)', fontsize=11)
+    ax2.set_title('(b) ALA Accuracy Gain vs. Anchor Count', fontsize=11)
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(counts)
+    ax2.grid(True, alpha=0.3, axis='y')
+
+    # Add base accuracy as secondary info
+    ax2_twin = ax2.twinx()
+    ax2_twin.plot(x, base_acc, 'ko--', markersize=4, alpha=0.5, label='Base accuracy')
+    ax2_twin.set_ylabel('Base Accuracy', fontsize=10, color='gray')
+    ax2_twin.tick_params(axis='y', labelcolor='gray')
+    ax2_twin.legend(fontsize=8, loc='upper right')
+
+    for bar, d in zip(bars, delta_acc):
+        y = d + (0.002 if d >= 0 else -0.006)
+        ax2.text(bar.get_x() + bar.get_width()/2, y,
+                 f'{d:+.1%}', ha='center', va='bottom' if d >= 0 else 'top',
+                 fontsize=8, fontweight='bold')
+
+    plt.suptitle(
+        'Anchor availability analysis: ALA extracts more value when more local context is available',
+        fontsize=11, y=1.02)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    print(f"\n  Saved: {save_path}")
+
+
+# ============================================================
 # EXPERIMENT C: Layer-wise Attention Dilution
 # ============================================================
 
@@ -764,6 +982,15 @@ if __name__ == "__main__":
     # Plot main figure
     plot_attention_dilution(attn_dist, attn_acc, ala_vs_attn)
 
+    # Experiment E: Anchor availability
+    print("\n" + "=" * 70)
+    print("Running Experiment E: Anchor Availability Analysis")
+    print("=" * 70)
+    anchor_results = experiment_anchor_availability(
+        model, tokenizer, num_samples=30, max_length=128
+    )
+    plot_anchor_availability(anchor_results)
+
     # Experiment C: Layer-wise (optional)
     print("\n" + "=" * 70)
     print("Running Experiment C: Layer-wise Dilution")
@@ -775,6 +1002,7 @@ if __name__ == "__main__":
 
     print("\n" + "=" * 70)
     print("DONE. Plots saved:")
-    print("  attention_dilution.png  — main 2-panel figure for paper")
-    print("  attention_by_layer.png  — layer-wise dilution")
+    print("  attention_dilution.png    — main 3-panel figure for paper")
+    print("  anchor_availability.png   — anchor count analysis")
+    print("  attention_by_layer.png    — layer-wise dilution")
     print("=" * 70)

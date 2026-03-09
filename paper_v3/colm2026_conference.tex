@@ -44,7 +44,7 @@ University of California, Berkeley \\
 
 \begin{abstract}
 Masked diffusion language models (MDMs) generate text by iteratively unmasking tokens, predicting each masked position using context gathered through the frozen model's transformer layers.
-These layers perform general-purpose attention---handling long-range meaning, syntax, and world knowledge simultaneously---and may not fully exploit locally available resolved-token context.
+These layers perform general-purpose attention---handling long-range meaning, syntax, and world knowledge simultaneously---and we show empirically that their attention to local resolved tokens is severely diluted at high mask ratios (only 4\% of attention reaches nearby unmasked tokens when 95\% of positions are masked).
 We introduce \textbf{Adjacent Latent Anchoring (ALA)}, a lightweight learned module that provides a dedicated pathway for local context extraction: for each masked position, ALA identifies nearby resolved tokens, computes corrections via a mixture-of-experts network, and aggregates them through learned attention---all without modifying the frozen base model or its decoding procedure.
 Applied post-hoc to LLaDA-8B-Instruct, ALA improves GSM8K accuracy from 75\% to 81\% and MATH from 46\% to 50\%, while improving logical reasoning (4/4 vs.\ 3/4 baseline) and maintaining generation diversity.
 A key finding is that per-step corrections compound across denoising: the optimal blending coefficient ($\alpha{=}0.05$) is $2\times$ lower than the training value, and corrected tokens become anchors for subsequent steps, creating an implicit dependency chain that amplifies small per-step improvements into large end-to-end gains.
@@ -63,8 +63,10 @@ LLaDA~\citep{nie2025llada} scaled this paradigm to 8 billion parameters, matchin
 
 At each denoising step, an MDM predicts every masked token using context gathered through its frozen transformer layers.
 These layers perform general-purpose attention---handling long-range meaning, syntax, world knowledge, and local context all at once.
-We observe that a small dedicated module, focused specifically on extracting signal from nearby \emph{resolved} tokens, can improve predictions beyond what the general-purpose attention achieves.
-This suggests that the base model's attention, while powerful, does not fully exploit locally available resolved-token context---perhaps because it was trained to predict each masked position independently~\citep{sahoo2024simple}, optimizing each position's own accuracy rather than maximizing local context utilization.
+We analyze the base model's attention patterns and find that at high mask ratios---where MDMs spend most of their denoising trajectory---up to 89\% of attention weight at masked positions is absorbed by other \texttt{[MASK]} tokens, which all share identical embeddings and carry no useful information.
+Only 4\% reaches nearby unmasked tokens (Section~\ref{sec:dilution}).
+Moreover, masked positions that happen to allocate more attention to local unmasked tokens predict up to $8\times$ more accurately, demonstrating that the local signal exists but is underexploited.
+This motivates a dedicated module for local context extraction.
 
 Existing post-hoc methods for MDMs focus on either the \emph{decoding schedule}---which tokens to commit when---through remasking~\citep{shi2025remdm}, dependency testing~\citep{chen2025punt}, copula models~\citep{nisonoff2025copula}, energy-based correction~\citep{sun2025edlm}, and path planning~\citep{gat2025p2}; or on \emph{activation steering} using reference sequences~\citep{wang2026ilrr} or hand-designed intervention directions~\citep{turner2024steering, li2023iti}.
 None provides a learned, general-purpose module for improving the per-step predictions themselves from the model's own hidden states.
@@ -82,7 +84,7 @@ Our contributions are:
     \item \textbf{Architecture.} We introduce ALA, the first \emph{learned} post-hoc inference-time module for MDMs. Unlike sampling-level methods (ReMDM, PUNT) or methods requiring external AR models (Copula Diffusion, EDLM-AR), ALA learns to produce context-aware corrections from MDM hidden states alone.
     \item \textbf{Empirical gains.} Applied to LLaDA-8B-Instruct, ALA achieves +6\% on GSM8K (75\%$\to$81\%), +4\% on MATH (46\%$\to$50\%), and perfect logical reasoning (4/4 vs.\ 3/4), while improving generation diversity.
     \item \textbf{Correction compounding.} We show that the optimal inference-time $\alpha$ (0.05) is $2\times$ lower than the training $\alpha$ (0.1), and that performance degrades steeply at higher values. This reveals that per-step corrections compound across iterative denoising, analogous to learning rate sensitivity in gradient descent.
-    \item \textbf{Mechanism analysis.} Representation analysis shows ALA increases pairwise hidden-state similarity (nearby masked positions share anchors and receive similar corrections) without improving ground-truth alignment---indicating the mechanism operates through subtle logit-level adjustments amplified by iterative denoising, not direct representational correction. We discuss why a 206M module can find signal that an 8B model's general-purpose attention misses.
+    \item \textbf{Attention dilution analysis.} We provide the first empirical characterization of attention dilution in MDMs: at high mask ratios, masked positions attend overwhelmingly to other \texttt{[MASK]} tokens. Positions with more local-unmasked attention predict $8\times$ more accurately, and ALA's corrections are net-positive across all attention regimes (5:1 correction-to-regression ratio), with the module extracting signal from local context that the diluted base attention underexploits.
 \end{enumerate}
 
 
@@ -119,6 +121,7 @@ The attention patterns learned during training are good enough for each position
 
 \textbf{(2) Attention dilution.}
 Each attention head serves many functions across all positions and all mask ratios.
+We verify this empirically in Section~\ref{sec:dilution}: at $\pmask{=}0.85$, masked positions allocate 79\% of attention to other \texttt{[MASK]} tokens, leaving only 8\% for local unmasked tokens within 10 positions.
 A specialized module that attends \emph{only} to nearby resolved tokens, using a separate set of learned parameters, can focus its entire capacity on this one task.
 
 \textbf{(3) Frozen output head.}
@@ -356,53 +359,77 @@ This is analogous to the learning rate in gradient descent: the optimal per-step
 The blending coefficient is a free parameter that can be tuned at inference time without retraining.
 This decouples the router's learned \emph{correction direction} from its applied \emph{correction magnitude}.
 
-\subsection{Representation analysis}
+\subsection{Attention dilution analysis}
+\label{sec:dilution}
 
-We conduct a representation-level analysis to understand ALA's mechanism.
-Using 50 Wikitext-2 sequences, we measure:
-\begin{itemize}
-    \item \textbf{Pairwise cosine similarity:} Average cosine similarity between all pairs of hidden states at masked positions.
-    \item \textbf{Ground-truth alignment:} Cosine similarity between each masked position's hidden state and the hidden state it \emph{would have} if the ground-truth token were present (computed by running the model with the clean sequence).
-\end{itemize}
+We extract attention weights from the base model's last 8 transformer layers by replacing the scaled dot-product attention with a manual computation that captures the weight matrix.
+For each masked position, we measure the fraction of attention allocated to three categories: other \texttt{[MASK]} tokens, distant unmasked tokens, and local unmasked tokens (within distance $r{=}10$, matching ALA's anchor range).
+
+\paragraph{Attention budget.}
+Table~\ref{tab:attn_budget} shows the attention breakdown across mask ratios.
+At $\pmask{=}0.15$, masked positions allocate 32\% of attention to local unmasked tokens---sufficient for effective prediction.
+But at $\pmask{=}0.85$ (representative of early denoising), 79\% of attention goes to other \texttt{[MASK]} tokens and only 8.5\% reaches local unmasked tokens.
+At $\pmask{=}0.95$, this drops to 4\%.
+This dilution occurs because \texttt{[MASK]} tokens share identical input embeddings, producing similar Q/K projections that compete for attention mass via softmax normalization.
 
 \begin{table}[t]
 \begin{center}
-\begin{tabular}{ccc}
+\begin{tabular}{cccc}
 \toprule
-$\pmask$ & $\Delta$ Pairwise & $\Delta$ Alignment \\
+$\pmask$ & To \texttt{[MASK]} & To Local Unmask & To Distant Unmask \\
 \midrule
-0.15 & +0.030 & $-$0.002 \\
-0.30 & +0.032 & $-$0.002 \\
-0.50 & +0.036 & $-$0.001 \\
-0.70 & +0.036 & $-$0.001 \\
-0.85 & +0.028 & +0.001 \\
-0.95 & +0.007 & +0.001 \\
+0.15 & 0.143 & 0.321 & 0.536 \\
+0.30 & 0.222 & 0.276 & 0.502 \\
+0.50 & 0.312 & 0.229 & 0.460 \\
+0.70 & 0.582 & 0.141 & 0.276 \\
+0.85 & 0.789 & 0.085 & 0.127 \\
+0.95 & 0.892 & 0.040 & 0.069 \\
 \bottomrule
 \end{tabular}
 \end{center}
-\caption{Representation analysis. ALA consistently increases pairwise hidden-state similarity (``cohesion'') but does not measurably improve alignment with ground-truth representations.}\label{tab:mechinterp}
+\caption{Attention budget at masked positions (averaged over last 8 layers, 20 Wikitext-2 samples). At high mask ratios, the vast majority of attention goes to uninformative \texttt{[MASK]} tokens.}\label{tab:attn_budget}
 \end{table}
 
-Table~\ref{tab:mechinterp} shows that ALA consistently increases pairwise similarity ($+0.03$ on average) but does \emph{not} increase ground-truth alignment (near zero or slightly negative).
+\paragraph{Local attention predicts accuracy.}
+We pool masked positions across $\pmask \in \{0.50, 0.70, 0.85\}$ and bin them into quintiles by local-unmasked attention.
+Positions in the lowest quintile (Q1, least local attention) achieve only 6.1\% prediction accuracy, while Q5 positions (most local attention) achieve 47.7\%---an $8\times$ gap.
+This confirms that the local context signal \emph{exists} and is \emph{predictive}, but the base model's diluted attention does not consistently extract it.
 
-\paragraph{The cohesion increase is expected.}
-Nearby masked positions share the same resolved anchors.
-Since ALA conditions on these shared anchors, it pushes nearby masked positions in similar directions---hence higher pairwise similarity.
-This is not a bug or a surprise; it is a direct consequence of the local anchor architecture.
+\paragraph{ALA helps across all attention regimes.}
+We additionally measure whether ALA flips predictions from wrong to right (corrections) or right to wrong (regressions) within each quintile (Table~\ref{tab:ala_correction}).
+ALA achieves a 5:1 correction-to-regression ratio overall (185 corrections vs.\ 36 regressions across 6,035 positions).
+The correction rate is highest at Q5 (5.0\%), where local unmasked tokens are available but the base model's general-purpose attention does not fully exploit them.
+At Q1, ALA still provides net improvement (2.9\% corrections vs.\ 0.3\% regressions), though its impact is limited by the scarcity of local anchors---consistent with ALA's mechanism of extracting signal from nearby resolved tokens.
 
-\paragraph{The lack of alignment improvement is informative.}
-ALA does not work by ``pushing masked representations toward their correct values'' in hidden space.
-Instead, it makes targeted adjustments that shift the \emph{logit} distribution enough to change argmax decisions at critical positions.
-The output head $W_{\text{out}}$ is a high-dimensional linear map ($\mathbb{R}^{4096} \to \mathbb{R}^{128K}$): two hidden states that are 0.98 cosine-similar can produce completely different top-1 token predictions.
-At $\alpha{=}0.05$, the per-step perturbation is sub-threshold in representation space but sufficient in logit space.
+\begin{table}[t]
+\begin{center}
+\begin{tabular}{ccccc}
+\toprule
+Quintile & Base Acc & Router Acc & Corrections & Regressions \\
+\midrule
+Q1 (low attn) & 6.1\% & 8.6\% & 2.9\% & 0.3\% \\
+Q2 & 18.2\% & 20.9\% & 3.0\% & 0.3\% \\
+Q3 & 33.2\% & 34.7\% & 2.6\% & 1.1\% \\
+Q4 & 46.8\% & 48.1\% & 1.9\% & 0.7\% \\
+Q5 (high attn) & 48.8\% & 53.2\% & 5.0\% & 0.6\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+\caption{ALA correction and regression rates by local-unmasked attention quintile. Positions are pooled across $\pmask \in \{0.50, 0.70, 0.85\}$, then binned by how much base-model attention each position allocates to nearby unmasked tokens. ALA is net-positive across all quintiles.}\label{tab:ala_correction}
+\end{table}
 
-\paragraph{Amplification through denoising.}
-The end-to-end improvement (+6\% GSM8K) far exceeds what single-step accuracy gains (+2--3\%) would predict.
-This is explained by the cascading mechanism: a corrected token at step $t$ is committed and becomes an anchor at step $t{+}1$, providing better context for subsequent corrections.
-Over 256 steps, small improvements compound---it is this iterative amplification, not the per-step corrections alone, that drives the end-to-end gains.
+\begin{figure}[t]
+\begin{center}
+\includegraphics[width=\linewidth]{attention_dilution.png}
+\end{center}
+\caption{Attention dilution analysis. \textbf{(a)} At high mask ratios, masked positions attend overwhelmingly to other \texttt{[MASK]} tokens. \textbf{(b)} Positions with more local-unmasked attention predict more accurately. \textbf{(c)} ALA corrections (green) consistently outweigh regressions (red) across all attention quintiles.}\label{fig:attn_dilution}
+\end{figure}
 
-This distinguishes ALA from representation alignment methods like ReFT~\citep{wu2024reft} or ITI~\citep{li2023iti}, which explicitly steer hidden states toward target directions.
-ALA instead operates at the margin of the argmax decision boundary, relying on iterative denoising to amplify subtle corrections.
+\subsection{Representation analysis}
+
+Representation-level probing (Appendix~\ref{app:repr}) reveals that ALA consistently increases pairwise cosine similarity among masked positions ($+0.03$ on average) but does \emph{not} improve alignment with ground-truth hidden states.
+The cohesion increase is expected---nearby masked positions share the same resolved anchors, so ALA pushes them in similar directions---while the lack of alignment improvement indicates that ALA operates through targeted \emph{logit-level} shifts rather than moving representations toward their ``correct'' values in hidden space.
+Combined with the compounding mechanism (corrected tokens become anchors for subsequent steps), this explains why end-to-end gains (+6\% GSM8K) far exceed single-step accuracy improvements (+2--3\%).
 
 
 % ============================================================
@@ -460,8 +487,8 @@ ALA is designed to be orthogonal to ReMDM, PUNT, and similar sampling-level meth
 Evaluating their combination is a natural next step---ALA improves per-step predictions while these methods improve the schedule of which predictions to commit.
 
 \textbf{Mechanistic understanding.}
-Our representation analysis shows that ALA works through hidden-state cohesion and logit-level shifts rather than ground-truth alignment.
-A deeper understanding---perhaps through probing which expert specializations emerge, or analyzing which token predictions are most frequently corrected---would strengthen the theoretical motivation.
+Our attention dilution analysis (Section~\ref{sec:dilution}) provides empirical motivation, and representation analysis shows ALA works through logit-level shifts rather than ground-truth alignment.
+Deeper investigation---probing which expert specializations emerge, or analyzing which token categories benefit most from ALA---would further strengthen the theoretical grounding.
 
 
 % ============================================================
@@ -470,9 +497,9 @@ A deeper understanding---perhaps through probing which expert specializations em
 % ============================================================
 
 We introduced Adjacent Latent Anchoring (ALA), a learned post-hoc module that provides a dedicated local context extraction pathway for masked diffusion language models.
-Our results suggest that the general-purpose attention in frozen MDMs does not fully exploit locally available resolved-token context, and that a small specialized module (2.6\% of base model parameters) can improve per-step predictions enough to produce meaningful end-to-end gains (+6\% GSM8K, +4\% MATH) without modifying the base model or decoding procedure.
+We show that the general-purpose attention in frozen MDMs suffers from severe attention dilution at high mask ratios---up to 89\% of attention is absorbed by uninformative \texttt{[MASK]} tokens---and that a small specialized module (2.6\% of base model parameters) can compensate by providing a dedicated local context pathway, producing meaningful end-to-end gains (+6\% GSM8K, +4\% MATH) without modifying the base model or decoding procedure.
 A key finding is that per-step corrections compound across iterative denoising, making the blending coefficient critical: the optimal value ($\alpha{=}0.05$) is $2\times$ lower than the training setting, with performance degrading rapidly at higher values.
-Representation analysis confirms that ALA's mechanism operates through logit-level adjustments amplified by denoising, not through direct representational correction.
+Attention analysis reveals that masked positions allocate the vast majority of attention to uninformative \texttt{[MASK]} tokens at high mask ratios, empirically grounding ALA's motivation, while the mechanism operates through logit-level adjustments amplified by iterative denoising.
 As the first learned inference-time module for MDMs, ALA opens a design axis orthogonal to existing sampling-level improvements and can in principle be composed with them.
 
 % ============================================================
@@ -528,11 +555,29 @@ Data & Wiki-103 + GSM8K$\times$12 + MATH$\times$12 \\
 \caption{Complete ALA architecture and training specification.}\label{tab:arch}
 \end{table}
 
-\section{Representation analysis figures}
+\section{Representation analysis}
 \label{app:repr}
 
-Figure~\ref{fig:cossim} shows the pairwise cosine similarity analysis across mask ratios, confirming that ALA consistently increases representational cohesion.
-Figure~\ref{fig:twopanel} provides the joint view of pairwise similarity and ground-truth alignment.
+Table~\ref{tab:mechinterp} shows the full breakdown of ALA's effect on hidden-state geometry across mask ratios.
+Figure~\ref{fig:cossim} shows the pairwise cosine similarity analysis, and Figure~\ref{fig:twopanel} provides the joint view of pairwise similarity and ground-truth alignment.
+
+\begin{table}[h]
+\begin{center}
+\begin{tabular}{ccc}
+\toprule
+$\pmask$ & $\Delta$ Pairwise & $\Delta$ Alignment \\
+\midrule
+0.15 & +0.030 & $-$0.002 \\
+0.30 & +0.032 & $-$0.002 \\
+0.50 & +0.036 & $-$0.001 \\
+0.70 & +0.036 & $-$0.001 \\
+0.85 & +0.028 & +0.001 \\
+0.95 & +0.007 & +0.001 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\caption{Representation analysis. ALA consistently increases pairwise hidden-state similarity (``cohesion'') but does not measurably improve alignment with ground-truth representations.}\label{tab:mechinterp}
+\end{table}
 
 \begin{figure}[h]
 \begin{center}
