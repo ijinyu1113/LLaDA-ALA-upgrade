@@ -1,0 +1,112 @@
+=========================================
+JOB 1951236 on gh058.hsn.cm.delta.internal.ncsa.edu
+NVIDIA GH200 120GB, 97871 MiB, 570.172.08
+PyTorch 2.5.1
+Transformers 4.36.2
+CUDA 12.4
+GPU: NVIDIA GH200 120GB
+BF16 supported? True
+=========================================
+Loading model...
+Router loaded from amip_router_best.pt
+
+======================================================================
+Running Experiment A: Attention Distribution
+======================================================================
+
+============================================================
+EXPERIMENT A: Attention Distribution by Mask Ratio
+  Analyzing layers: [24, 25, 26, 27, 28, 29, 30, 31]
+============================================================
+  p_mask=0.15... done
+  p_mask=0.30... done
+  p_mask=0.50... done
+  p_mask=0.70... done
+  p_mask=0.85... done
+  p_mask=0.95... done
+
+  p_mask   |    To Mask |  To Local Unmask |  To Distant Unmask
+  ----------------------------------------------------------
+  0.15     |     0.1429 |           0.3212 |             0.5359
+  0.30     |     0.2219 |           0.2758 |             0.5023
+  0.50     |     0.3115 |           0.2291 |             0.4595
+  0.70     |     0.5824 |           0.1412 |             0.2764
+  0.85     |     0.7885 |           0.0847 |             0.1269
+  0.95     |     0.8915 |           0.0399 |             0.0686
+
+======================================================================
+Running Experiment B: Attention-Accuracy Correlation
+======================================================================
+
+============================================================
+EXPERIMENT B: Attention-Accuracy Correlation
+  Analyzing layers: [24, 25, 26, 27, 28, 29, 30, 31]
+============================================================
+  p_mask=0.50... done
+  p_mask=0.70... done
+  p_mask=0.85... done
+
+  Attention Bin        |   Accuracy |    Count
+  --------------------------------------------
+  [0.0000, 0.0489)     |     0.0606 |     1222
+  [0.0489, 0.0853)     |     0.1702 |     1222
+  [0.0853, 0.1264)     |     0.2733 |     1222
+  [0.1264, 0.1867)     |     0.4002 |     1222
+  [0.1867, 0.7480)     |     0.4767 |     1223
+
+  Overall accuracy: 0.2762 (n=6111)
+
+======================================================================
+Running Experiment D: ALA Correction Rate vs Base Attention
+======================================================================
+
+============================================================
+EXPERIMENT D: ALA Correction Rate vs Base Attention
+  Analyzing layers: [24, 25, 26, 27, 28, 29, 30, 31]
+============================================================
+  p_mask=0.50... done
+  p_mask=0.70... done
+  p_mask=0.85... done
+
+  Bin   |   Base Acc |   Router Acc |   Correction |   Regression |    Count
+  --------------------------------------------------------------------
+  Q1    |     0.0605 |       0.0862 |       0.0290 |       0.0033 |     1207
+  Q2    |     0.1823 |       0.2088 |       0.0298 |       0.0033 |     1207
+  Q3    |     0.3322 |       0.3471 |       0.0257 |       0.0108 |     1207
+  Q4    |     0.4681 |       0.4805 |       0.0191 |       0.0066 |     1207
+  Q5    |     0.4880 |       0.5319 |       0.0497 |       0.0058 |     1207
+
+  Total corrections (wrong->right): 185
+  Total regressions (right->wrong): 36
+  Net improvement: 149
+
+  Saved: attention_dilution.png
+
+======================================================================
+Running Experiment C: Layer-wise Dilution
+======================================================================
+
+============================================================
+EXPERIMENT C: Layer-wise Attention Dilution (p_mask=0.85)
+============================================================
+  Sample 1/10
+  Sample 2/10
+  Sample 3/10
+  Sample 4/10
+  Sample 5/10
+  Sample 6/10
+  Sample 7/10
+  Sample 8/10
+  Sample 9/10
+  Sample 10/10
+
+  Layer 0:  local=0.2134, mask=0.1240
+  Layer 16: local=0.0849, mask=0.6887
+  Layer 31: local=0.0930, mask=0.6771
+  Saved: attention_by_layer.png
+
+======================================================================
+DONE. Plots saved:
+  attention_dilution.png  — main 2-panel figure for paper
+  attention_by_layer.png  — layer-wise dilution
+======================================================================

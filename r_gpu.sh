@@ -53,5 +53,5 @@ print(f'BF16 supported? {torch.cuda.is_bf16_supported()}')
 echo "========================================="
 
 #time srun python3 /u/iyu1/nim_game_project/llada/train_router.py && \
-time srun python3 /u/iyu1/nim_game_project/llada/mech_interp.py
+time srun python3 /u/iyu1/nim_game_project/llada/attention_analysis.py
 
