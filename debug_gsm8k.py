@@ -1,13 +1,71 @@
-"""Debug GSM8K: print full baseline vs router responses side-by-side.
-Runs THREE modes per question: Baseline, Router (with special token protection),
-and Router-NoProt (without protection) to test if alpha=0.05 is safe alone."""
+"""Alpha sweep: test α = 0.01..0.06 on 200 GSM8K + 200 MATH samples."""
 import torch
 import re
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from datasets import load_dataset
-from generation_utils import generate
-from models import AMIPRouterInference, ALALLaDA, MASK_TOKEN_ID, SPECIAL_TOKEN_IDS
+import sys
 import os
+import time
+import math
+
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from datasets import load_dataset, concatenate_datasets
+from generation_utils import generate
+from models import ALALLaDA, MASK_TOKEN_ID
+
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
+
+# CUDA optimizations
+torch.backends.cudnn.benchmark = True
+torch.set_float32_matmul_precision('medium')
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+
+ALPHAS = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06]
+NUM_SAMPLES = 200
+
+# ============================================================
+# Answer extraction
+# ============================================================
+
+def extract_answer_gsm8k(text):
+    if "####" in text:
+        after = text.split("####")[-1].strip()
+        match = re.match(r'-?\d[\d,]*\.?\d*', after)
+        if match:
+            return match.group().rstrip('.').replace(',', '')
+    numbers = re.findall(r'-?\d[\d,]*\.?\d*', text)
+    if numbers:
+        return numbers[-1].rstrip('.').replace(',', '')
+    return ""
+
+def extract_gold_gsm8k(answer_text):
+    if "####" in answer_text:
+        after = answer_text.split("####")[-1].strip()
+        return ''.join(c for c in after if c.isdigit() or c == '-')
+    return ""
+
+def extract_boxed(text):
+    idx = text.rfind("\\boxed{")
+    if idx == -1:
+        idx = text.rfind("boxed{")
+        if idx == -1:
+            return text.strip().split()[-1] if text.strip() else ""
+        idx += 6
+    else:
+        idx += 7
+    depth = 1
+    end = idx
+    while end < len(text) and depth > 0:
+        if text[end] == '{':
+            depth += 1
+        elif text[end] == '}':
+            depth -= 1
+        end += 1
+    return text[idx:end-1].strip() if depth == 0 else ""
+
+# ============================================================
+# Model Loading
+# ============================================================
 
 model_id = "GSAI-ML/LLaDA-8B-Instruct"
 print("Loading model...")
@@ -26,158 +84,167 @@ if os.path.exists(weights_path):
     print(f"Router loaded from {weights_path}")
 model.eval()
 
-dataset = load_dataset("openai/gsm8k", "main", split="test")
+# ============================================================
+# GSM8K Alpha Sweep
+# ============================================================
 
-def extract_answer(text):
-    if "####" in text:
-        after = text.split("####")[-1].strip()
-        match = re.match(r'-?\d[\d,]*\.?\d*', after)
-        if match:
-            return match.group().rstrip('.').replace(',', '')
-    numbers = re.findall(r'-?\d[\d,]*\.?\d*', text)
-    if numbers:
-        return numbers[-1].rstrip('.').replace(',', '')
-    return ""
+print(f"\n{'='*60}")
+print(f"GSM8K Alpha Sweep (n={NUM_SAMPLES})")
+print(f"{'='*60}", flush=True)
 
-def extract_gold(answer_text):
-    if "####" in answer_text:
-        after = answer_text.split("####")[-1].strip()
-        return ''.join(c for c in after if c.isdigit() or c == '-')
-    return ""
+gsm8k = load_dataset("openai/gsm8k", "main", split="test")
 
-# Monkey-patch to toggle special token protection
-_original_forward = ALALLaDA.forward.__wrapped__ if hasattr(ALALLaDA.forward, '__wrapped__') else ALALLaDA.forward
-
-def _forward_no_protect(self, input_ids, attention_mask=None, alpha=None, prompt_length=0):
-    """Same as ALALLaDA.forward but skips special token logit restoration."""
-    import math
-    outputs = self.base_model(input_ids, attention_mask=attention_mask, output_hidden_states=True)
-    h_L = outputs.hidden_states[-1].to(torch.bfloat16)
-    m_idx = [torch.where(row == MASK_TOKEN_ID)[0] for row in input_ids]
-    u_idx = [torch.where(row != MASK_TOKEN_ID)[0] for row in input_ids]
-    delta = self.router(h_L, m_idx, u_idx)
-    if alpha is None:
-        from models import ALPHA_BASE, ALPHA_SCALE
-        gen_region = input_ids[:, prompt_length:]
-        p_mask = (gen_region == MASK_TOKEN_ID).float().mean().item()
-        alpha = ALPHA_BASE + ALPHA_SCALE * p_mask
-    blended = h_L + alpha * delta
-    logits = self.base_model.model.transformer.ff_out(blended)
-    if self.base_model.model.config.scale_logits:
-        logits *= 1.0 / math.sqrt(self.base_model.model.config.d_model)
-    # NO special token restoration here
-    return type('Obj', (object,), {'logits': logits})()
-
-print("\n" + "=" * 80)
-num_samples = 15
-scores = {"Baseline": 0, "Router": 0, "Router-NoProt": 0}
-
-for idx in range(num_samples):
-    sample = dataset[idx]
-    question = sample["question"]
-    gold = extract_gold(sample["answer"])
+# Pre-extract gold answers and prompts
+gsm8k_items = []
+for idx in range(min(NUM_SAMPLES, len(gsm8k))):
+    sample = gsm8k[idx]
+    gold = extract_gold_gsm8k(sample["answer"])
     if not gold:
         continue
-
     prompt = (
         f"Solve this math problem step by step. "
         f"Give your final answer after ####.\n\n"
-        f"Question: {question}\n\nSolution:"
+        f"Question: {sample['question']}\n\nSolution:"
     )
-    ids = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)["input_ids"].to(device)
+    ids = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512
+                    )["input_ids"].to(device)
+    gsm8k_items.append((idx, ids, gold))
 
-    print(f"\n{'='*80}")
-    print(f"Q{idx+1}: {question[:120]}")
-    print(f"Gold: {gold}")
-    print(f"{'='*80}")
+print(f"  Valid samples: {len(gsm8k_items)}", flush=True)
 
-    for mode in ["Baseline", "Router", "Router-NoProt"]:
-        # Swap forward method for no-protection test
-        if mode == "Router-NoProt":
-            ALALLaDA.forward = _forward_no_protect
-            use_router = True
-        elif mode == "Router":
-            ALALLaDA.forward = _original_forward
-            use_router = True
-        else:
-            ALALLaDA.forward = _original_forward
-            use_router = False
+# Run baseline once (alpha-independent)
+print(f"\n  Running Baseline...", flush=True)
+t0 = time.time()
+base_correct = 0
+base_preds = {}
+for i, (idx, ids, gold) in enumerate(gsm8k_items):
+    torch.manual_seed(42)
+    out = generate(model, ids, steps=256, gen_length=256, use_router=False, temp=0.0)
+    response = tokenizer.decode(out[0, ids.shape[1]:], skip_special_tokens=True).strip()
+    pred = extract_answer_gsm8k(response)
+    hit = (pred == gold)
+    base_correct += int(hit)
+    base_preds[idx] = pred
+    if (i + 1) % 50 == 0:
+        print(f"    [{i+1}/{len(gsm8k_items)}] acc={base_correct/(i+1):.1%}", flush=True)
 
+base_acc = base_correct / len(gsm8k_items)
+print(f"  Baseline: {base_correct}/{len(gsm8k_items)} ({base_acc:.1%}) in {time.time()-t0:.0f}s", flush=True)
+
+# Run each alpha
+gsm8k_results = {"Baseline": base_acc}
+for alpha in ALPHAS:
+    print(f"\n  Running alpha={alpha}...", flush=True)
+    t0 = time.time()
+    correct = 0
+    for i, (idx, ids, gold) in enumerate(gsm8k_items):
         torch.manual_seed(42)
         out = generate(model, ids, steps=256, gen_length=256,
-                       use_router=use_router, temp=0.0)
+                       use_router=True, temp=0.0, alpha=alpha)
         response = tokenizer.decode(out[0, ids.shape[1]:], skip_special_tokens=True).strip()
-        pred = extract_answer(response)
+        pred = extract_answer_gsm8k(response)
         hit = (pred == gold)
-        scores[mode] += int(hit)
+        correct += int(hit)
+        if (i + 1) % 50 == 0:
+            print(f"    [{i+1}/{len(gsm8k_items)}] acc={correct/(i+1):.1%}", flush=True)
 
-        mark = "\u2713" if hit else "\u2717"
-        print(f"\n  --- {mode} {mark} (pred={pred}) ---")
-        print(f"  {response[:500]}")
+    acc = correct / len(gsm8k_items)
+    gsm8k_results[f"alpha={alpha}"] = acc
+    print(f"  alpha={alpha}: {correct}/{len(gsm8k_items)} ({acc:.1%}) "
+          f"delta={acc - base_acc:+.1%} in {time.time()-t0:.0f}s", flush=True)
 
-        gen_ids = out[0, ids.shape[1]:].tolist()
-        last_tokens = [(tid, tokenizer.decode([tid])) for tid in gen_ids[-20:] if tid != 0]
-        print(f"  Last tokens: {last_tokens}")
+# ============================================================
+# MATH Alpha Sweep
+# ============================================================
 
-    # Restore original forward
-    ALALLaDA.forward = _original_forward
+print(f"\n{'='*60}")
+print(f"MATH Alpha Sweep (n={NUM_SAMPLES})")
+print(f"{'='*60}", flush=True)
 
-print(f"\n{'='*80}")
-print(f"GSM8K Summary (n={num_samples}):")
-for mode, correct in scores.items():
-    print(f"  {mode:<15} {correct}/{num_samples}")
+math_subjects = ["algebra", "counting_and_probability", "geometry",
+                 "intermediate_algebra", "number_theory", "prealgebra", "precalculus"]
+math_parts = [load_dataset("EleutherAI/hendrycks_math", subj, split="test")
+              for subj in math_subjects]
+math_ds = concatenate_datasets(math_parts)
 
-# ── Logical Reasoning Test ─────────────────────────────────
-LOGIC_TEST_CASES = [
-    ("Triple Swap",  "Alice has an apple, Bob has a banana, and Charlie has a cherry. Alice swaps with Bob. Then Bob swaps with Charlie. Now, Alice has the", "banana"),
-    ("Distractor",   "A gold coin is in the red box. A silver coin is in the blue bag. I replace the gold coin with a copper coin. The red box now has the", "copper"),
-    ("Relational",   "The mountain is taller than the hill. The building is shorter than the hill. The shortest object is the", "building"),
-    ("State Swap",   "I have a box and a bag. The ball is in the box. The key is in the bag. I swap them. The bag now has the", "ball"),
-]
+math_items = []
+for idx in range(min(NUM_SAMPLES, len(math_ds))):
+    sample = math_ds[idx]
+    gold = extract_boxed(sample["solution"])
+    if not gold:
+        continue
+    prompt = (
+        f"Solve this math problem. Put your final answer in \\boxed{{}}.\n\n"
+        f"Problem: {sample['problem']}\n\nSolution:"
+    )
+    ids = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512
+                    )["input_ids"].to(device)
+    math_items.append((idx, ids, gold))
 
-print(f"\n{'='*80}")
-print("LOGICAL REASONING (temp=0.0)")
-print(f"{'='*80}")
-print(f"  {'Category':<15} | {'Expected':<10} | {'Baseline':<20} | {'Router':<20} | {'Router-NoProt':<20}")
-print(f"  {'-'*95}")
+print(f"  Valid samples: {len(math_items)}", flush=True)
 
-logic_scores = {"Baseline": 0, "Router": 0, "Router-NoProt": 0}
+# Run baseline once
+print(f"\n  Running Baseline...", flush=True)
+t0 = time.time()
+base_correct = 0
+for i, (idx, ids, gold) in enumerate(math_items):
+    torch.manual_seed(42)
+    out = generate(model, ids, steps=256, gen_length=256, use_router=False, temp=0.0)
+    response = tokenizer.decode(out[0, ids.shape[1]:], skip_special_tokens=True).strip()
+    pred = extract_boxed(response)
+    hit = (pred.strip().rstrip('.') == gold.strip().rstrip('.'))
+    base_correct += int(hit)
+    if (i + 1) % 50 == 0:
+        print(f"    [{i+1}/{len(math_items)}] acc={base_correct/(i+1):.1%}", flush=True)
 
-for category, prompt, expected in LOGIC_TEST_CASES:
-    prompt_ids = tokenizer(prompt, return_tensors="pt")["input_ids"].to(device)
-    answers = {}
+base_acc = base_correct / len(math_items)
+print(f"  Baseline: {base_correct}/{len(math_items)} ({base_acc:.1%}) in {time.time()-t0:.0f}s", flush=True)
 
-    for mode in ["Baseline", "Router", "Router-NoProt"]:
-        if mode == "Router-NoProt":
-            ALALLaDA.forward = _forward_no_protect
-            use_router = True
-        elif mode == "Router":
-            ALALLaDA.forward = _original_forward
-            use_router = True
-        else:
-            ALALLaDA.forward = _original_forward
-            use_router = False
-
+# Run each alpha
+math_results = {"Baseline": base_acc}
+for alpha in ALPHAS:
+    print(f"\n  Running alpha={alpha}...", flush=True)
+    t0 = time.time()
+    correct = 0
+    for i, (idx, ids, gold) in enumerate(math_items):
         torch.manual_seed(42)
-        out = generate(model, prompt_ids, steps=64, gen_length=32,
-                       use_router=use_router, temp=0.0)
-        ans = tokenizer.decode(out[0, prompt_ids.shape[1]:],
-                               skip_special_tokens=True).strip().lower()
-        hit = expected.lower() in ans
-        logic_scores[mode] += int(hit)
-        mark = "\u2713" if hit else "\u2717"
-        answers[mode] = f"{mark} {ans[:18]}"
+        out = generate(model, ids, steps=256, gen_length=256,
+                       use_router=True, temp=0.0, alpha=alpha)
+        response = tokenizer.decode(out[0, ids.shape[1]:], skip_special_tokens=True).strip()
+        pred = extract_boxed(response)
+        hit = (pred.strip().rstrip('.') == gold.strip().rstrip('.'))
+        correct += int(hit)
+        if (i + 1) % 50 == 0:
+            print(f"    [{i+1}/{len(math_items)}] acc={correct/(i+1):.1%}", flush=True)
 
-    ALALLaDA.forward = _original_forward
-    print(f"  {category:<15} | {expected:<10} | {answers['Baseline']:<20} | "
-          f"{answers['Router']:<20} | {answers['Router-NoProt']:<20}")
+    acc = correct / len(math_items)
+    math_results[f"alpha={alpha}"] = acc
+    print(f"  alpha={alpha}: {correct}/{len(math_items)} ({acc:.1%}) "
+          f"delta={acc - base_acc:+.1%} in {time.time()-t0:.0f}s", flush=True)
 
-print(f"\n  Scores: ", end="")
-for mode, c in logic_scores.items():
-    print(f"{mode} {c}/4  ", end="")
-print()
+# ============================================================
+# Summary
+# ============================================================
 
-print(f"\n{'='*80}")
-print("CONCLUSION:")
-print("  If Router-NoProt matches Router on both GSM8K and logical reasoning,")
-print("  special token protection is unnecessary at alpha=0.05.")
+print(f"\n{'='*60}")
+print("ALPHA SWEEP SUMMARY")
+print(f"{'='*60}")
+
+print(f"\n  {'Alpha':<12} | {'GSM8K':>10} | {'MATH':>10}")
+print(f"  {'-'*38}")
+print(f"  {'Baseline':<12} | {gsm8k_results['Baseline']:>9.1%} | {math_results['Baseline']:>9.1%}")
+for alpha in ALPHAS:
+    k = f"alpha={alpha}"
+    g = gsm8k_results[k]
+    m = math_results[k]
+    gd = g - gsm8k_results['Baseline']
+    md = m - math_results['Baseline']
+    print(f"  {alpha:<12} | {g:>7.1%} ({gd:+.1%}) | {m:>7.1%} ({md:+.1%})")
+
+print(f"\n  Best GSM8K alpha: ", end="")
+best_g = max(ALPHAS, key=lambda a: gsm8k_results[f"alpha={a}"])
+print(f"{best_g} ({gsm8k_results[f'alpha={best_g}']:.1%})")
+
+print(f"  Best MATH alpha:  ", end="")
+best_m = max(ALPHAS, key=lambda a: math_results[f"alpha={a}"])
+print(f"{best_m} ({math_results[f'alpha={best_m}']:.1%})")
