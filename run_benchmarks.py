@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 import re
+import sys
 import tempfile
 import time
 
@@ -142,13 +143,13 @@ def load_model():
 
 @torch.no_grad()
 def eval_gsm8k_full(model, tokenizer, args):
-    print(f"\n{'='*60}")
-    print("GSM8K Full Test Set (n=1319)")
-    print(f"{'='*60}")
+    print(f"\n{'='*60}", flush=True)
+    print("GSM8K Full Test Set (n=1319)", flush=True)
+    print(f"{'='*60}", flush=True)
 
     dataset = load_dataset("openai/gsm8k", "main", split="test")
     num_samples = len(dataset)
-    print(f"  Total samples: {num_samples}")
+    print(f"  Total samples: {num_samples}", flush=True)
 
     ckpt_path = os.path.join(args.checkpoint_dir, "gsm8k_checkpoint.json")
     ckpt = checkpoint_load(ckpt_path) if args.resume else {}
@@ -181,8 +182,14 @@ def eval_gsm8k_full(model, tokenizer, args):
             prompt, return_tensors="pt", truncation=True, max_length=512
         )["input_ids"].to(model.device)
 
+        if done_this_run == 0:
+            print(f"  First sample: prompt_len={ids.shape[1]}, generating...", flush=True)
+
         result = {"gold": gold}
         for mode in ["Baseline", "Router"]:
+            if done_this_run == 0:
+                t_mode = time.time()
+                print(f"    {mode} starting...", flush=True)
             use_router = (mode == "Router")
             torch.manual_seed(42)
             out = generate(model, ids, steps=256, gen_length=256,
@@ -194,6 +201,8 @@ def eval_gsm8k_full(model, tokenizer, args):
             is_correct = (pred == gold)
             result[f"pred_{mode.lower()}"] = pred
             result[f"correct_{mode.lower()}"] = is_correct
+            if done_this_run == 0:
+                print(f"    {mode} done in {time.time()-t_mode:.1f}s, pred={pred}, gold={gold}", flush=True)
 
         per_sample[str(idx)] = result
         completed.add(idx)
@@ -253,9 +262,9 @@ def eval_gsm8k_full(model, tokenizer, args):
 @torch.no_grad()
 def eval_math_scaled(model, tokenizer, args):
     num_samples = 200
-    print(f"\n{'='*60}")
-    print(f"MATH Benchmark (n={num_samples})")
-    print(f"{'='*60}")
+    print(f"\n{'='*60}", flush=True)
+    print(f"MATH Benchmark (n={num_samples})", flush=True)
+    print(f"{'='*60}", flush=True)
 
     math_subjects = ["algebra", "counting_and_probability", "geometry",
                      "intermediate_algebra", "number_theory", "prealgebra", "precalculus"]
@@ -363,13 +372,13 @@ def eval_math_scaled(model, tokenizer, args):
 
 @torch.no_grad()
 def eval_arc(model, tokenizer, args):
-    print(f"\n{'='*60}")
-    print("ARC-Challenge (full test set)")
-    print(f"{'='*60}")
+    print(f"\n{'='*60}", flush=True)
+    print("ARC-Challenge (full test set)", flush=True)
+    print(f"{'='*60}", flush=True)
 
     dataset = load_dataset("allenai/ai2_arc", "ARC-Challenge", split="test")
     num_samples = len(dataset)
-    print(f"  Total samples: {num_samples}")
+    print(f"  Total samples: {num_samples}", flush=True)
 
     ckpt_path = os.path.join(args.checkpoint_dir, "arc_checkpoint.json")
     ckpt = checkpoint_load(ckpt_path) if args.resume else {}
@@ -377,7 +386,7 @@ def eval_arc(model, tokenizer, args):
     per_sample = ckpt.get("per_sample", {})
 
     if completed:
-        print(f"  Resuming: {len(completed)} samples already done")
+        print(f"  Resuming: {len(completed)} samples already done", flush=True)
 
     t0 = time.time()
     done_this_run = 0
@@ -406,8 +415,14 @@ def eval_arc(model, tokenizer, args):
             prompt, return_tensors="pt", truncation=True, max_length=512
         )["input_ids"].to(model.device)
 
+        if done_this_run == 0:
+            print(f"  First sample: prompt_len={ids.shape[1]}, generating...", flush=True)
+
         result = {"gold": gold}
         for mode in ["Baseline", "Router"]:
+            if done_this_run == 0:
+                t_mode = time.time()
+                print(f"    {mode} starting...", flush=True)
             use_router = (mode == "Router")
             torch.manual_seed(42)
             out = generate(model, ids, steps=32, gen_length=32,
@@ -420,6 +435,8 @@ def eval_arc(model, tokenizer, args):
             result[f"pred_{mode.lower()}"] = pred
             result[f"correct_{mode.lower()}"] = is_correct
             result[f"response_{mode.lower()}"] = response[:100]
+            if done_this_run == 0:
+                print(f"    {mode} done in {time.time()-t_mode:.1f}s, pred={pred}, gold={gold}", flush=True)
 
         per_sample[str(idx)] = result
         completed.add(idx)
@@ -488,6 +505,16 @@ def parse_args():
 
 
 if __name__ == "__main__":
+    # Force unbuffered output for SLURM
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
+
+    # CUDA optimizations for GH200
+    torch.backends.cudnn.benchmark = True
+    torch.set_float32_matmul_precision('medium')  # allow TF32 for matmuls
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+
     args = parse_args()
     os.makedirs(args.checkpoint_dir, exist_ok=True)
 

@@ -137,49 +137,57 @@ class AMIPRouterInference(nn.Module):
         delta_h = torch.zeros_like(h_L)  # [B, L, d] — output starts as all zeros
         bsz, seq_len, d_model = h_L.shape
 
-        for b in range(bsz):  # process each sample in the batch
-            m_idx, u_idx = mask_indices[b], unmasked_indices[b]
+        for b in range(bsz):
+            m_idx = mask_indices[b]
+            u_idx = unmasked_indices[b]
             if not isinstance(u_idx, torch.Tensor):
                 u_idx = torch.tensor(u_idx, device=h_L.device)
+            if len(m_idx) == 0 or len(u_idx) == 0:
+                continue
 
-            for a in m_idx:  # for each masked position in this sample
-                # Find unmasked neighbors within range_r positions
-                diff = (u_idx - a).abs()
-                adj = u_idx[(diff > 0) & (diff <= range_r)]  # boolean filter: nearby + unmasked
-                if len(adj) == 0:
-                    continue  # no unmasked neighbors -> skip (delta stays zero)
+            # --- Vectorized adjacency: [M, U] pairwise distances ---
+            dists = (m_idx.unsqueeze(1).float() - u_idx.unsqueeze(0).float()).abs()
+            adj_mask = (dists > 0) & (dists <= range_r)  # [M, U]
 
-                N = len(adj)  # number of anchor neighbors for this mask token
-                # a:a+1 (slice) keeps the dim -> [1, d]; a (index) would give [d]
-                # We need [1, d] so it broadcasts correctly with [N, d] below
-                h_mask = h_L[b, a:a+1, :]                             # [1, d]
-                h_anchors = h_L[b, adj, :]                             # [N, d] — fancy index with tensor of positions
+            # All (mask, anchor) pairs where adjacency holds
+            pair_m, pair_u = adj_mask.nonzero(as_tuple=True)  # indices into m_idx, u_idx
+            if len(pair_m) == 0:
+                continue
 
-                # --- MoE routing (same computation as training router) ---
-                # Route using the mask token (all anchors share the same routing weights)
-                weights = F.softmax(self.routing_net(h_mask), dim=-1)   # [1, K]
-                # expand: repeat [1, d] -> [N, d] without copying memory, then concat with anchors
-                conditioned = torch.cat(
-                    [h_anchors, h_mask.expand(N, -1)], dim=-1
-                )                                                       # [N, 2d]
-                # Weighted sum of all experts' outputs for each anchor
-                # weights[:, i:i+1] is [1, 1], expert(conditioned) is [N, d]
-                # Broadcasting: [1, 1] * [N, d] -> [N, d], then sum across all experts
-                pair_deltas = sum(
-                    weights[:, i:i+1] * expert(conditioned)
-                    for i, expert in enumerate(self.experts)
-                )                                                       # [N, d]
+            # Gather hidden states for ALL pairs at once
+            h_masks = h_L[b, m_idx[pair_m]]      # [P, d]
+            h_anchors = h_L[b, u_idx[pair_u]]    # [P, d]
 
-                # --- Learned attention aggregation across anchors ---
-                # Unlike training (sigmoid per pair), inference uses softmax to RANK anchors:
-                # "Which of these N anchors is most useful?" not "Is this one anchor useful?"
-                q = self.q_proj(h_mask)                                 # [1, d_proj]
-                k = self.k_proj(h_anchors)                              # [N, d_proj]
-                # q * k broadcasts [1, d_proj] * [N, d_proj] -> [N, d_proj], then sum -> [N]
-                scores = (q * k).sum(dim=-1) / (self.d_proj ** 0.5)    # [N] — one score per anchor
-                combine_w = F.softmax(scores, dim=0)                    # [N] — normalized weights (sum to 1)
-                # Weighted combination: [N, 1] * [N, d] -> [N, d], sum over anchors -> [d]
-                delta_h[b, a] = (combine_w.unsqueeze(-1) * pair_deltas).sum(0)
+            # --- Batched MoE: all pairs through experts in one shot ---
+            weights = F.softmax(self.routing_net(h_masks), dim=-1)   # [P, K]
+            conditioned = torch.cat([h_anchors, h_masks], dim=-1)    # [P, 2d]
+            pair_deltas = sum(
+                weights[:, i:i+1] * expert(conditioned)
+                for i, expert in enumerate(self.experts)
+            )  # [P, d]
+
+            # --- Batched attention scores ---
+            q = self.q_proj(h_masks)     # [P, d_proj]
+            k = self.k_proj(h_anchors)   # [P, d_proj]
+            scores = (q * k).sum(dim=-1) / (self.d_proj ** 0.5)  # [P]
+
+            # --- Per-mask-position softmax (vectorized via scatter) ---
+            # Stable softmax: subtract max per group, exp, normalize
+            num_masks = len(m_idx)
+            max_scores = torch.full((num_masks,), -1e9, device=scores.device, dtype=scores.dtype)
+            max_scores.scatter_reduce_(0, pair_m, scores, reduce='amax')
+            exp_scores = torch.exp(scores - max_scores[pair_m])
+            sum_exp = torch.zeros(num_masks, device=scores.device, dtype=scores.dtype)
+            sum_exp.scatter_add_(0, pair_m, exp_scores)
+            combine_w = exp_scores / sum_exp[pair_m].clamp(min=1e-8)  # [P]
+
+            # --- Scatter weighted deltas back to positions ---
+            weighted_deltas = combine_w.unsqueeze(-1) * pair_deltas  # [P, d]
+            delta_h[b].scatter_add_(
+                0,
+                m_idx[pair_m].unsqueeze(-1).expand_as(weighted_deltas),
+                weighted_deltas
+            )
 
         return delta_h
 
