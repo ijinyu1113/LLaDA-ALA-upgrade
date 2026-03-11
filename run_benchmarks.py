@@ -1,13 +1,13 @@
 """
 Scaled Benchmark Evaluation for ALA-LLaDA
 ==========================================
-Runs GSM8K (full 1319), MATH (200), and ARC-Challenge (1172) with
-checkpointing for crash recovery on long runs.
+Runs GSM8K, MATH, ARC-Challenge, GPQA Diamond, BBH (hardest subtasks)
+with checkpointing for crash recovery.
 
 Usage:
-    python run_benchmarks.py --benchmarks gsm8k math arc --resume
-    python run_benchmarks.py --benchmarks arc              # quick validation
-    python run_benchmarks.py --benchmarks gsm8k --resume   # overnight run
+    python run_benchmarks.py --benchmarks gsm8k math arc gpqa bbh
+    python run_benchmarks.py --benchmarks arc gpqa bbh   # fast ones first
+    python run_benchmarks.py --benchmarks gsm8k --resume # overnight run
 """
 
 import argparse
@@ -24,6 +24,8 @@ from datasets import load_dataset, concatenate_datasets
 
 from models import ALALLaDA, MASK_TOKEN_ID, ALPHA_BASE, ALPHA_SCALE
 from generation_utils import generate
+
+INFERENCE_ALPHA = 0.02
 
 
 # ============================================================
@@ -59,7 +61,7 @@ def format_time(seconds):
     return f"{m}m {s:02d}s"
 
 
-# --- Answer extraction (reused from test_router.py) ---
+# --- Answer extraction ---
 
 def extract_answer_gsm8k(text):
     if "####" in text:
@@ -127,363 +129,333 @@ def load_model():
     if os.path.exists(weights_path):
         model.router.load_state_dict(
             torch.load(weights_path, map_location=device),
-            strict=False  # allow missing conf_gate from old checkpoints
+            strict=False
         )
         print(f"Router loaded from {weights_path}")
     else:
         print("WARNING: Using random router weights.")
 
     model.eval()
-    print(f"Alpha schedule: alpha = {ALPHA_BASE} + {ALPHA_SCALE} * p_mask (flat at {ALPHA_BASE})")
+    print(f"Inference alpha: {INFERENCE_ALPHA}")
     return model, tokenizer
 
 
 # ============================================================
-# GSM8K Full (n=1319)
+# Generic eval loop helper
+# ============================================================
+
+def _run_eval_loop(items, model, tokenizer, args, benchmark_name,
+                   extract_fn, match_fn, gen_length=256, steps=256,
+                   block_length=32, progress_every=50):
+    """Generic eval loop with checkpointing.
+
+    items: list of (idx, prompt_ids, gold, meta_dict)
+    extract_fn: response_text -> predicted answer
+    match_fn: (pred, gold) -> bool
+    """
+    num_samples = len(items)
+    ckpt_path = os.path.join(args.checkpoint_dir, f"{benchmark_name}_checkpoint.json")
+    ckpt = checkpoint_load(ckpt_path) if args.resume else {}
+    completed = set(ckpt.get("completed_indices", []))
+    per_sample = ckpt.get("per_sample", {})
+
+    if completed:
+        print(f"  Resuming: {len(completed)} samples already done")
+
+    t0 = time.time()
+    done_this_run = 0
+
+    for item_idx, (idx, ids, gold, meta) in enumerate(items):
+        if idx in completed:
+            continue
+
+        result = {"gold": gold}
+        result.update(meta)
+
+        for mode in ["Baseline", "Router"]:
+            use_router = (mode == "Router")
+            alpha = INFERENCE_ALPHA if use_router else None
+            torch.manual_seed(42)
+            out = generate(model, ids, steps=steps, gen_length=gen_length,
+                           block_length=block_length,
+                           use_router=use_router, temp=0.0, alpha=alpha)
+            response = tokenizer.decode(
+                out[0, ids.shape[1]:], skip_special_tokens=True
+            ).strip()
+            pred = extract_fn(response)
+            is_correct = match_fn(pred, gold)
+            result[f"pred_{mode.lower()}"] = pred
+            result[f"correct_{mode.lower()}"] = is_correct
+
+        per_sample[str(idx)] = result
+        completed.add(idx)
+        done_this_run += 1
+
+        n_done = len(completed)
+        if n_done % progress_every == 0 or done_this_run <= 2:
+            elapsed = time.time() - t0
+            rate = done_this_run / elapsed if elapsed > 0 else 0
+            remaining = (num_samples - n_done) / rate if rate > 0 else 0
+            base_correct = sum(1 for v in per_sample.values() if v.get("correct_baseline"))
+            router_correct = sum(1 for v in per_sample.values() if v.get("correct_router"))
+            n_scored = sum(1 for v in per_sample.values() if "correct_baseline" in v)
+            if n_scored > 0:
+                print(f"  [{n_done}/{num_samples}] "
+                      f"Base: {base_correct}/{n_scored} ({base_correct/n_scored:.1%})  "
+                      f"Router: {router_correct}/{n_scored} ({router_correct/n_scored:.1%})  "
+                      f"ETA: {format_time(remaining)}", flush=True)
+
+        if done_this_run % args.save_every == 0:
+            checkpoint_save(ckpt_path, {
+                "completed_indices": sorted(completed),
+                "per_sample": per_sample,
+            })
+
+    checkpoint_save(ckpt_path, {
+        "completed_indices": sorted(completed),
+        "per_sample": per_sample,
+    })
+
+    n_scored = sum(1 for v in per_sample.values() if "correct_baseline" in v)
+    base_correct = sum(1 for v in per_sample.values() if v.get("correct_baseline"))
+    router_correct = sum(1 for v in per_sample.values() if v.get("correct_router"))
+    base_acc = base_correct / n_scored if n_scored > 0 else 0
+    router_acc = router_correct / n_scored if n_scored > 0 else 0
+
+    print(f"\n  {benchmark_name} Final Results (n={n_scored}):")
+    print(f"  Baseline: {base_acc:.4f} ({base_correct}/{n_scored})")
+    print(f"  Router:   {router_acc:.4f} ({router_correct}/{n_scored})")
+    print(f"  Delta:    {router_acc - base_acc:+.4f}")
+
+    return {
+        "Baseline": {"accuracy": base_acc, "correct": base_correct, "total": n_scored},
+        "Router": {"accuracy": router_acc, "correct": router_correct, "total": n_scored},
+        "per_sample": per_sample,
+    }
+
+
+# ============================================================
+# GSM8K (n=200)
 # ============================================================
 
 @torch.no_grad()
-def eval_gsm8k_full(model, tokenizer, args):
+def eval_gsm8k(model, tokenizer, args, n=200):
     print(f"\n{'='*60}", flush=True)
-    print("GSM8K Full Test Set (n=1319)", flush=True)
+    print(f"GSM8K (n={n}, α={INFERENCE_ALPHA})", flush=True)
     print(f"{'='*60}", flush=True)
 
     dataset = load_dataset("openai/gsm8k", "main", split="test")
-    num_samples = len(dataset)
-    print(f"  Total samples: {num_samples}", flush=True)
-
-    ckpt_path = os.path.join(args.checkpoint_dir, "gsm8k_checkpoint.json")
-    ckpt = checkpoint_load(ckpt_path) if args.resume else {}
-    completed = set(ckpt.get("completed_indices", []))
-    per_sample = ckpt.get("per_sample", {})
-
-    if completed:
-        print(f"  Resuming: {len(completed)} samples already done")
-
-    t0 = time.time()
-    done_this_run = 0
-
-    for idx in range(num_samples):
-        if idx in completed:
-            continue
-
-        sample = dataset[idx]
-        question = sample["question"]
-        gold = extract_gold_gsm8k(sample["answer"])
+    items = []
+    for idx in range(min(n, len(dataset))):
+        gold = extract_gold_gsm8k(dataset[idx]["answer"])
         if not gold:
-            completed.add(idx)
             continue
+        prompt = (f"Solve this math problem step by step. "
+                  f"Give your final answer after ####.\n\n"
+                  f"Question: {dataset[idx]['question']}\n\nSolution:")
+        ids = tokenizer(prompt, return_tensors="pt", truncation=True,
+                        max_length=512)["input_ids"].to(model.device)
+        items.append((idx, ids, gold, {}))
 
-        prompt = (
-            f"Solve this math problem step by step. "
-            f"Give your final answer after ####.\n\n"
-            f"Question: {question}\n\nSolution:"
-        )
-        ids = tokenizer(
-            prompt, return_tensors="pt", truncation=True, max_length=512
-        )["input_ids"].to(model.device)
-
-        if done_this_run == 0:
-            print(f"  First sample: prompt_len={ids.shape[1]}, generating...", flush=True)
-
-        result = {"gold": gold}
-        for mode in ["Baseline", "Router"]:
-            if done_this_run == 0:
-                t_mode = time.time()
-                print(f"    {mode} starting...", flush=True)
-            use_router = (mode == "Router")
-            torch.manual_seed(42)
-            out = generate(model, ids, steps=256, gen_length=256,
-                           use_router=use_router, temp=0.0)
-            response = tokenizer.decode(
-                out[0, ids.shape[1]:], skip_special_tokens=True
-            ).strip()
-            pred = extract_answer_gsm8k(response)
-            is_correct = (pred == gold)
-            result[f"pred_{mode.lower()}"] = pred
-            result[f"correct_{mode.lower()}"] = is_correct
-            if done_this_run == 0:
-                print(f"    {mode} done in {time.time()-t_mode:.1f}s, pred={pred}, gold={gold}", flush=True)
-
-        per_sample[str(idx)] = result
-        completed.add(idx)
-        done_this_run += 1
-
-        # Progress reporting
-        n_done = len(completed)
-        if n_done % 10 == 0 or done_this_run <= 3:
-            elapsed = time.time() - t0
-            rate = done_this_run / elapsed if elapsed > 0 else 0
-            remaining = (num_samples - n_done) / rate if rate > 0 else 0
-
-            base_correct = sum(1 for v in per_sample.values() if v.get("correct_baseline"))
-            router_correct = sum(1 for v in per_sample.values() if v.get("correct_router"))
-            n_scored = sum(1 for v in per_sample.values() if "correct_baseline" in v)
-
-            print(f"  [{n_done}/{num_samples}] "
-                  f"Base: {base_correct}/{n_scored} ({base_correct/n_scored:.1%})  "
-                  f"Router: {router_correct}/{n_scored} ({router_correct/n_scored:.1%})  "
-                  f"ETA: {format_time(remaining)}")
-
-        # Checkpoint
-        if done_this_run % args.save_every == 0:
-            checkpoint_save(ckpt_path, {
-                "completed_indices": sorted(completed),
-                "per_sample": per_sample,
-            })
-
-    # Final save
-    checkpoint_save(ckpt_path, {
-        "completed_indices": sorted(completed),
-        "per_sample": per_sample,
-    })
-
-    # Summary
-    n_scored = sum(1 for v in per_sample.values() if "correct_baseline" in v)
-    base_correct = sum(1 for v in per_sample.values() if v.get("correct_baseline"))
-    router_correct = sum(1 for v in per_sample.values() if v.get("correct_router"))
-    base_acc = base_correct / n_scored if n_scored > 0 else 0
-    router_acc = router_correct / n_scored if n_scored > 0 else 0
-
-    print(f"\n  GSM8K Final Results (n={n_scored}):")
-    print(f"  Baseline: {base_acc:.4f} ({base_correct}/{n_scored})")
-    print(f"  Router:   {router_acc:.4f} ({router_correct}/{n_scored})")
-    print(f"  Delta:    {router_acc - base_acc:+.4f}")
-
-    return {
-        "Baseline": {"accuracy": base_acc, "correct": base_correct, "total": n_scored},
-        "Router": {"accuracy": router_acc, "correct": router_correct, "total": n_scored},
-    }
+    print(f"  Valid samples: {len(items)}", flush=True)
+    return _run_eval_loop(items, model, tokenizer, args, "gsm8k",
+                          extract_fn=extract_answer_gsm8k,
+                          match_fn=lambda p, g: p == g,
+                          gen_length=256, steps=256, progress_every=50)
 
 
 # ============================================================
-# MATH Scaled (n=200)
+# MATH (n=200)
 # ============================================================
 
 @torch.no_grad()
-def eval_math_scaled(model, tokenizer, args):
-    num_samples = 200
+def eval_math(model, tokenizer, args, n=200):
     print(f"\n{'='*60}", flush=True)
-    print(f"MATH Benchmark (n={num_samples})", flush=True)
+    print(f"MATH (n={n}, α={INFERENCE_ALPHA})", flush=True)
     print(f"{'='*60}", flush=True)
 
-    math_subjects = ["algebra", "counting_and_probability", "geometry",
-                     "intermediate_algebra", "number_theory", "prealgebra", "precalculus"]
-    math_parts = [load_dataset("EleutherAI/hendrycks_math", subj, split="test")
-                  for subj in math_subjects]
-    dataset = concatenate_datasets(math_parts)
-    print(f"  Total available: {len(dataset)}, using {num_samples}")
+    subjects = ["algebra", "counting_and_probability", "geometry",
+                "intermediate_algebra", "number_theory", "prealgebra", "precalculus"]
+    parts = [load_dataset("EleutherAI/hendrycks_math", subj, split="test")
+             for subj in subjects]
+    dataset = concatenate_datasets(parts)
 
-    ckpt_path = os.path.join(args.checkpoint_dir, "math_checkpoint.json")
-    ckpt = checkpoint_load(ckpt_path) if args.resume else {}
-    completed = set(ckpt.get("completed_indices", []))
-    per_sample = ckpt.get("per_sample", {})
-
-    if completed:
-        print(f"  Resuming: {len(completed)} samples already done")
-
-    t0 = time.time()
-    done_this_run = 0
-
-    for idx in range(num_samples):
-        if idx in completed:
-            continue
-
+    items = []
+    for idx in range(min(n, len(dataset))):
         sample = dataset[idx]
-        problem = sample["problem"]
         gold = extract_boxed(sample["solution"])
         if not gold:
-            completed.add(idx)
             continue
+        level = sample.get("level", "Unknown")
+        prompt = (f"Solve this math problem. Put your final answer in \\boxed{{}}.\n\n"
+                  f"Problem: {sample['problem']}\n\nSolution:")
+        ids = tokenizer(prompt, return_tensors="pt", truncation=True,
+                        max_length=512)["input_ids"].to(model.device)
+        items.append((idx, ids, gold, {"level": level}))
 
-        prompt = (
-            f"Solve this math problem. Put your final answer in \\boxed{{}}.\n\n"
-            f"Problem: {problem}\n\nSolution:"
-        )
-        ids = tokenizer(
-            prompt, return_tensors="pt", truncation=True, max_length=512
-        )["input_ids"].to(model.device)
-
-        result = {"gold": gold}
-        for mode in ["Baseline", "Router"]:
-            use_router = (mode == "Router")
-            torch.manual_seed(42)
-            out = generate(model, ids, steps=256, gen_length=256,
-                           use_router=use_router, temp=0.0)
-            response = tokenizer.decode(
-                out[0, ids.shape[1]:], skip_special_tokens=True
-            ).strip()
-            pred = extract_boxed(response)
-            pred_norm = pred.strip().rstrip('.')
-            gold_norm = gold.strip().rstrip('.')
-            is_correct = (pred_norm == gold_norm)
-            result[f"pred_{mode.lower()}"] = pred
-            result[f"correct_{mode.lower()}"] = is_correct
-
-        per_sample[str(idx)] = result
-        completed.add(idx)
-        done_this_run += 1
-
-        n_done = len(completed)
-        if n_done % 10 == 0 or done_this_run <= 3:
-            elapsed = time.time() - t0
-            rate = done_this_run / elapsed if elapsed > 0 else 0
-            remaining = (num_samples - n_done) / rate if rate > 0 else 0
-
-            base_correct = sum(1 for v in per_sample.values() if v.get("correct_baseline"))
-            router_correct = sum(1 for v in per_sample.values() if v.get("correct_router"))
-            n_scored = sum(1 for v in per_sample.values() if "correct_baseline" in v)
-
-            print(f"  [{n_done}/{num_samples}] "
-                  f"Base: {base_correct}/{n_scored} ({base_correct/n_scored:.1%})  "
-                  f"Router: {router_correct}/{n_scored} ({router_correct/n_scored:.1%})  "
-                  f"ETA: {format_time(remaining)}")
-
-        if done_this_run % args.save_every == 0:
-            checkpoint_save(ckpt_path, {
-                "completed_indices": sorted(completed),
-                "per_sample": per_sample,
-            })
-
-    checkpoint_save(ckpt_path, {
-        "completed_indices": sorted(completed),
-        "per_sample": per_sample,
-    })
-
-    n_scored = sum(1 for v in per_sample.values() if "correct_baseline" in v)
-    base_correct = sum(1 for v in per_sample.values() if v.get("correct_baseline"))
-    router_correct = sum(1 for v in per_sample.values() if v.get("correct_router"))
-    base_acc = base_correct / n_scored if n_scored > 0 else 0
-    router_acc = router_correct / n_scored if n_scored > 0 else 0
-
-    print(f"\n  MATH Final Results (n={n_scored}):")
-    print(f"  Baseline: {base_acc:.4f} ({base_correct}/{n_scored})")
-    print(f"  Router:   {router_acc:.4f} ({router_correct}/{n_scored})")
-    print(f"  Delta:    {router_acc - base_acc:+.4f}")
-
-    return {
-        "Baseline": {"accuracy": base_acc, "correct": base_correct, "total": n_scored},
-        "Router": {"accuracy": router_acc, "correct": router_correct, "total": n_scored},
-    }
+    print(f"  Valid samples: {len(items)}", flush=True)
+    return _run_eval_loop(items, model, tokenizer, args, "math",
+                          extract_fn=extract_boxed,
+                          match_fn=lambda p, g: p.strip().rstrip('.') == g.strip().rstrip('.'),
+                          gen_length=256, steps=256, progress_every=50)
 
 
 # ============================================================
-# ARC-Challenge (n=1172)
+# ARC-Challenge (n=200)
 # ============================================================
 
 @torch.no_grad()
-def eval_arc(model, tokenizer, args):
+def eval_arc(model, tokenizer, args, n=200):
     print(f"\n{'='*60}", flush=True)
-    print("ARC-Challenge (full test set)", flush=True)
+    print(f"ARC-Challenge (n={n}, α={INFERENCE_ALPHA})", flush=True)
     print(f"{'='*60}", flush=True)
 
     dataset = load_dataset("allenai/ai2_arc", "ARC-Challenge", split="test")
-    num_samples = len(dataset)
-    print(f"  Total samples: {num_samples}", flush=True)
+    items = []
+    for idx in range(min(n, len(dataset))):
+        sample = dataset[idx]
+        choices = sample["choices"]
+        choice_lines = [f"{label}) {text}"
+                        for label, text in zip(choices["label"], choices["text"])]
+        prompt = (f"Question: {sample['question']}\n"
+                  f"{chr(10).join(choice_lines)}\n\n"
+                  f"Answer:")
+        ids = tokenizer(prompt, return_tensors="pt", truncation=True,
+                        max_length=512)["input_ids"].to(model.device)
+        items.append((idx, ids, sample["answerKey"].upper(), {}))
 
-    ckpt_path = os.path.join(args.checkpoint_dir, "arc_checkpoint.json")
-    ckpt = checkpoint_load(ckpt_path) if args.resume else {}
-    completed = set(ckpt.get("completed_indices", []))
-    per_sample = ckpt.get("per_sample", {})
+    print(f"  Valid samples: {len(items)}", flush=True)
+    return _run_eval_loop(items, model, tokenizer, args, "arc",
+                          extract_fn=extract_answer_arc,
+                          match_fn=lambda p, g: p == g,
+                          gen_length=32, steps=32, progress_every=50)
 
-    if completed:
-        print(f"  Resuming: {len(completed)} samples already done", flush=True)
 
-    t0 = time.time()
-    done_this_run = 0
+# ============================================================
+# GPQA Diamond (n=198, all of them)
+# ============================================================
 
-    for idx in range(num_samples):
-        if idx in completed:
+@torch.no_grad()
+def eval_gpqa(model, tokenizer, args):
+    print(f"\n{'='*60}", flush=True)
+    print(f"GPQA Diamond (α={INFERENCE_ALPHA})", flush=True)
+    print(f"{'='*60}", flush=True)
+
+    dataset = load_dataset("hendrydong/gpqa_diamond_mc", split="train")
+    items = []
+    for idx in range(len(dataset)):
+        sample = dataset[idx]
+        prompt = (f"Answer this graduate-level question. "
+                  f"Put your final answer in \\boxed{{}}.\n\n"
+                  f"Question: {sample['Question']}\n"
+                  f"(A) {sample['choice_A']}\n"
+                  f"(B) {sample['choice_B']}\n"
+                  f"(C) {sample['choice_C']}\n"
+                  f"(D) {sample['choice_D']}\n\n"
+                  f"Answer:")
+        ids = tokenizer(prompt, return_tensors="pt", truncation=True,
+                        max_length=512)["input_ids"].to(model.device)
+        gold = sample["answer"]  # "A", "B", "C", or "D"
+        items.append((idx, ids, gold.upper(), {}))
+
+    def extract_gpqa(text):
+        boxed = extract_boxed(text)
+        if boxed:
+            match = re.search(r'([A-D])', boxed.upper())
+            if match:
+                return match.group(1)
+        match = re.search(r'\(([A-D])\)', text.upper())
+        if match:
+            return match.group(1)
+        match = re.search(r'([A-D])', text.upper())
+        return match.group(1) if match else ""
+
+    print(f"  Valid samples: {len(items)}", flush=True)
+    return _run_eval_loop(items, model, tokenizer, args, "gpqa",
+                          extract_fn=extract_gpqa,
+                          match_fn=lambda p, g: p == g,
+                          gen_length=128, steps=128, progress_every=50)
+
+
+# ============================================================
+# BBH — hardest subtasks (n~200 total)
+# ============================================================
+
+BBH_HARD_SUBTASKS = [
+    "dyck_languages",
+    "multistep_arithmetic_two",
+    "tracking_shuffled_objects_seven_objects",
+    "formal_fallacies",
+    "logical_deduction_seven_objects",
+    "web_of_lies",
+]
+
+@torch.no_grad()
+def eval_bbh(model, tokenizer, args):
+    print(f"\n{'='*60}", flush=True)
+    print(f"BBH Hard Subtasks (α={INFERENCE_ALPHA})", flush=True)
+    print(f"{'='*60}", flush=True)
+
+    # Load all subtasks and take ~33 from each (6 subtasks × 33 ≈ 200)
+    items = []
+    subtask_ranges = {}  # track which items belong to which subtask
+    for subtask in BBH_HARD_SUBTASKS:
+        try:
+            ds = load_dataset("lukaemon/bbh", subtask, split="test")
+        except Exception as e:
+            print(f"  WARNING: Could not load {subtask}: {e}")
             continue
 
-        sample = dataset[idx]
-        question = sample["question"]
-        choices = sample["choices"]
-        gold = sample["answerKey"]
+        # Take first 3 as few-shot examples, eval on next ~33
+        shots = []
+        for i in range(min(3, len(ds))):
+            shots.append(f"Q: {ds[i]['input']}\nA: {ds[i]['target']}")
+        shot_text = "\n\n".join(shots) + "\n\n" if shots else ""
 
-        # Build prompt with labeled choices
-        choice_lines = []
-        for label, text in zip(choices["label"], choices["text"]):
-            choice_lines.append(f"{label}) {text}")
-        choices_str = "\n".join(choice_lines)
+        start_idx = 3  # skip few-shot examples
+        per_subtask = 33
+        subtask_start = len(items)
 
-        prompt = (
-            f"Question: {question}\n"
-            f"{choices_str}\n\n"
-            f"Answer:"
-        )
-        ids = tokenizer(
-            prompt, return_tensors="pt", truncation=True, max_length=512
-        )["input_ids"].to(model.device)
+        for j in range(start_idx, min(start_idx + per_subtask, len(ds))):
+            global_idx = len(items)
+            prompt = f"{shot_text}Q: {ds[j]['input']}\nA:"
+            ids = tokenizer(prompt, return_tensors="pt", truncation=True,
+                            max_length=512)["input_ids"].to(model.device)
+            gold = ds[j]["target"].strip()
+            items.append((global_idx, ids, gold, {"subtask": subtask}))
 
-        if done_this_run == 0:
-            print(f"  First sample: prompt_len={ids.shape[1]}, generating...", flush=True)
+        subtask_ranges[subtask] = (subtask_start, len(items))
+        print(f"  {subtask}: {len(items) - subtask_start} samples (3-shot)")
 
-        result = {"gold": gold}
-        for mode in ["Baseline", "Router"]:
-            if done_this_run == 0:
-                t_mode = time.time()
-                print(f"    {mode} starting...", flush=True)
-            use_router = (mode == "Router")
-            torch.manual_seed(42)
-            out = generate(model, ids, steps=32, gen_length=32,
-                           block_length=32, use_router=use_router, temp=0.0)
-            response = tokenizer.decode(
-                out[0, ids.shape[1]:], skip_special_tokens=True
-            ).strip()
-            pred = extract_answer_arc(response)
-            is_correct = (pred == gold.upper())
-            result[f"pred_{mode.lower()}"] = pred
-            result[f"correct_{mode.lower()}"] = is_correct
-            result[f"response_{mode.lower()}"] = response[:100]
-            if done_this_run == 0:
-                print(f"    {mode} done in {time.time()-t_mode:.1f}s, pred={pred}, gold={gold}", flush=True)
+    print(f"  Total samples: {len(items)}", flush=True)
 
-        per_sample[str(idx)] = result
-        completed.add(idx)
-        done_this_run += 1
+    def match_bbh(pred, gold):
+        return pred.strip().lower() == gold.strip().lower()
 
-        n_done = len(completed)
-        if n_done % 50 == 0 or done_this_run <= 3:
-            elapsed = time.time() - t0
-            rate = done_this_run / elapsed if elapsed > 0 else 0
-            remaining = (num_samples - n_done) / rate if rate > 0 else 0
+    result = _run_eval_loop(items, model, tokenizer, args, "bbh",
+                            extract_fn=lambda text: text.strip().split("\n")[0].strip(),
+                            match_fn=match_bbh,
+                            gen_length=128, steps=128, progress_every=30)
 
-            base_correct = sum(1 for v in per_sample.values() if v.get("correct_baseline"))
-            router_correct = sum(1 for v in per_sample.values() if v.get("correct_router"))
-            n_scored = sum(1 for v in per_sample.values() if "correct_baseline" in v)
+    # Per-subtask breakdown
+    per_sample = result.get("per_sample", {})
+    print(f"\n  BBH by Subtask:")
+    print(f"  {'Subtask':<45} | {'N':>4} | {'Base':>8} | {'Router':>8} | {'Delta':>7}")
+    print(f"  {'-'*80}")
+    for subtask, (s, e) in subtask_ranges.items():
+        indices = [str(i) for i in range(s, e)]
+        n_sub = 0
+        b_c = 0
+        r_c = 0
+        for si in indices:
+            if si in per_sample and "correct_baseline" in per_sample[si]:
+                n_sub += 1
+                b_c += int(per_sample[si].get("correct_baseline", False))
+                r_c += int(per_sample[si].get("correct_router", False))
+        if n_sub > 0:
+            print(f"  {subtask:<45} | {n_sub:>4} | {b_c/n_sub:>7.0%} | {r_c/n_sub:>7.0%} | {(r_c-b_c)/n_sub:>+6.0%}")
 
-            print(f"  [{n_done}/{num_samples}] "
-                  f"Base: {base_correct}/{n_scored} ({base_correct/n_scored:.1%})  "
-                  f"Router: {router_correct}/{n_scored} ({router_correct/n_scored:.1%})  "
-                  f"ETA: {format_time(remaining)}")
-
-        if done_this_run % args.save_every == 0:
-            checkpoint_save(ckpt_path, {
-                "completed_indices": sorted(completed),
-                "per_sample": per_sample,
-            })
-
-    checkpoint_save(ckpt_path, {
-        "completed_indices": sorted(completed),
-        "per_sample": per_sample,
-    })
-
-    n_scored = sum(1 for v in per_sample.values() if "correct_baseline" in v)
-    base_correct = sum(1 for v in per_sample.values() if v.get("correct_baseline"))
-    router_correct = sum(1 for v in per_sample.values() if v.get("correct_router"))
-    base_acc = base_correct / n_scored if n_scored > 0 else 0
-    router_acc = router_correct / n_scored if n_scored > 0 else 0
-
-    print(f"\n  ARC-Challenge Final Results (n={n_scored}):")
-    print(f"  Baseline: {base_acc:.4f} ({base_correct}/{n_scored})")
-    print(f"  Router:   {router_acc:.4f} ({router_correct}/{n_scored})")
-    print(f"  Delta:    {router_acc - base_acc:+.4f}")
-
-    return {
-        "Baseline": {"accuracy": base_acc, "correct": base_correct, "total": n_scored},
-        "Router": {"accuracy": router_acc, "correct": router_correct, "total": n_scored},
-    }
+    return result
 
 
 # ============================================================
@@ -493,8 +465,8 @@ def eval_arc(model, tokenizer, args):
 def parse_args():
     parser = argparse.ArgumentParser(description="Scaled benchmark evaluation for ALA-LLaDA")
     parser.add_argument("--benchmarks", nargs="+",
-                        choices=["gsm8k", "math", "arc"],
-                        default=["gsm8k", "math", "arc"],
+                        choices=["gsm8k", "math", "arc", "gpqa", "bbh"],
+                        default=["gsm8k", "math", "arc", "gpqa", "bbh"],
                         help="Which benchmarks to run")
     parser.add_argument("--checkpoint-dir", default="checkpoints",
                         help="Directory for checkpoint files")
@@ -506,13 +478,11 @@ def parse_args():
 
 
 if __name__ == "__main__":
-    # Force unbuffered output for SLURM
     sys.stdout.reconfigure(line_buffering=True)
     sys.stderr.reconfigure(line_buffering=True)
 
-    # CUDA optimizations for GH200
     torch.backends.cudnn.benchmark = True
-    torch.set_float32_matmul_precision('medium')  # allow TF32 for matmuls
+    torch.set_float32_matmul_precision('medium')
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
 
@@ -524,20 +494,25 @@ if __name__ == "__main__":
     results = {}
     total_t0 = time.time()
 
-    # Run in order: ARC (fast) -> MATH (medium) -> GSM8K (long)
+    # Run order: fast first (ARC, GPQA, BBH), then longer (MATH, GSM8K)
     run_order = []
-    for b in ["arc", "math", "gsm8k"]:
+    for b in ["arc", "gpqa", "bbh", "math", "gsm8k"]:
         if b in args.benchmarks:
             run_order.append(b)
 
+    eval_fns = {
+        "gsm8k": lambda: eval_gsm8k(model, tokenizer, args),
+        "math": lambda: eval_math(model, tokenizer, args),
+        "arc": lambda: eval_arc(model, tokenizer, args),
+        "gpqa": lambda: eval_gpqa(model, tokenizer, args),
+        "bbh": lambda: eval_bbh(model, tokenizer, args),
+    }
+
     for benchmark in run_order:
         t0 = time.time()
-        if benchmark == "gsm8k":
-            results["gsm8k"] = eval_gsm8k_full(model, tokenizer, args)
-        elif benchmark == "math":
-            results["math"] = eval_math_scaled(model, tokenizer, args)
-        elif benchmark == "arc":
-            results["arc"] = eval_arc(model, tokenizer, args)
+        res = eval_fns[benchmark]()
+        # Don't save per_sample in summary (too large)
+        results[benchmark] = {k: v for k, v in res.items() if k != "per_sample"}
         elapsed = time.time() - t0
         print(f"  {benchmark} completed in {format_time(elapsed)}")
 
@@ -549,7 +524,7 @@ if __name__ == "__main__":
     # Final summary
     total_elapsed = time.time() - total_t0
     print(f"\n{'='*60}")
-    print(f"BENCHMARK SUMMARY (total time: {format_time(total_elapsed)})")
+    print(f"BENCHMARK SUMMARY (α={INFERENCE_ALPHA}, total: {format_time(total_elapsed)})")
     print(f"{'='*60}")
     print(f"  {'Benchmark':<15} | {'Baseline':>10} | {'Router':>10} | {'Delta':>10} | {'N':>6}")
     print(f"  {'-'*58}")
@@ -557,7 +532,7 @@ if __name__ == "__main__":
         b_acc = res["Baseline"]["accuracy"]
         r_acc = res["Router"]["accuracy"]
         n = res["Baseline"]["total"]
-        print(f"  {name:<15} | {b_acc:>10.4f} | {r_acc:>10.4f} | {r_acc-b_acc:>+10.4f} | {n:>6}")
+        print(f"  {name:<15} | {b_acc:>10.1%} | {r_acc:>10.1%} | {r_acc-b_acc:>+10.1%} | {n:>6}")
 
     print(f"\n  Results saved to {results_path}")
     print(f"  Checkpoints in {args.checkpoint_dir}/")
