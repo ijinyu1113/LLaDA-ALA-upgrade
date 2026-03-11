@@ -341,7 +341,7 @@ def eval_gpqa(model, tokenizer, args):
     print(f"GPQA Diamond (α={INFERENCE_ALPHA})", flush=True)
     print(f"{'='*60}", flush=True)
 
-    dataset = load_dataset("hendrydong/gpqa_diamond_mc", split="train")
+    dataset = load_dataset("hendrydong/gpqa_diamond_mc", split="test")
     items = []
     for idx in range(len(dataset)):
         sample = dataset[idx]
