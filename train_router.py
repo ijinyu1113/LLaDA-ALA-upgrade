@@ -270,7 +270,7 @@ def train():
     # ------------------------------------------------------------------
     # Training config — preliminary fast run
     # ------------------------------------------------------------------
-    alpha_base = ALPHA_BASE
+    alpha_base = 0.1   # train with larger alpha so router learns stronger corrections
     alpha_scale = ALPHA_SCALE
 
     best_val_loss = float('inf')
