@@ -126,7 +126,8 @@ def load_model():
     weights_path = "amip_router_best.pt"
     if os.path.exists(weights_path):
         model.router.load_state_dict(
-            torch.load(weights_path, map_location=device)
+            torch.load(weights_path, map_location=device),
+            strict=False  # allow missing conf_gate from old checkpoints
         )
         print(f"Router loaded from {weights_path}")
     else:

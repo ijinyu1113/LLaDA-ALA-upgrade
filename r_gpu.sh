@@ -52,7 +52,8 @@ print(f'BF16 supported? {torch.cuda.is_bf16_supported()}')
 "
 echo "========================================="
 
-#time srun python3 /u/iyu1/nim_game_project/llada/train_router.py && \
-#time srun python3 /u/iyu1/nim_game_project/llada/attention_analysis.py
-time srun python3 /u/iyu1/nim_game_project/llada/run_benchmarks.py --benchmarks arc math gsm8k --resume --save-every 50
+# Step 1: Retrain router with confidence gate (~1h at 10K steps)
+time srun python3 /u/iyu1/nim_game_project/llada/train_router.py && \
+# Step 2: Alpha sweep across all benchmarks
+time srun python3 /u/iyu1/nim_game_project/llada/debug_gsm8k.py
 

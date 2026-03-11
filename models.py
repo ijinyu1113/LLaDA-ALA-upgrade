@@ -71,40 +71,34 @@ class AMIPRouterTrain(nn.Module):
         self.experts = _make_experts(d_model, K)
         self.q_proj = nn.Linear(d_model, self.d_proj)  # query projection (from mask token)
         self.k_proj = nn.Linear(d_model, self.d_proj)  # key projection (from anchor token)
+        # Confidence gate: per-position "should I correct at all?" — zero-init starts at sigmoid(0)=0.5
+        self.conf_gate = nn.Linear(d_model, 1)
+        nn.init.zeros_(self.conf_gate.weight)
+        nn.init.zeros_(self.conf_gate.bias)
 
     def forward(self, h_anchor, h_mask):
         # --- Mixture of Experts (MoE) ---
-        # Decide how much each of the K=8 experts should contribute for each pair
-        weights = F.softmax(self.routing_net(h_mask), dim=-1)       # [N, K] — soft routing weights per pair
-
-        # Concatenate anchor + mask hidden states as context for experts
+        weights = F.softmax(self.routing_net(h_mask), dim=-1)       # [N, K]
         conditioned = torch.cat([h_anchor, h_mask], dim=-1)          # [N, 2d]
-
-        # Run ALL experts on ALL pairs (soft MoE: every expert processes every pair)
         expert_out = torch.stack(
-            [e(conditioned) for e in self.experts], dim=0             # list of K tensors [N, d] -> stack
-        )                                                            # [K, N, d]
-
-        # Multiply each expert's output by its routing weight:
-        # weights.t() transposes [N, K] -> [K, N]
-        # .unsqueeze(-1) adds a dim: [K, N] -> [K, N, 1] so it broadcasts with [K, N, d]
+            [e(conditioned) for e in self.experts], dim=0             # [K, N, d]
+        )
         weighted = expert_out * weights.t().unsqueeze(-1)            # [K, N, d]
-
-        # Sum across experts (dim=0) to get one combined delta per pair
         delta = weighted.sum(dim=0)                                  # [N, d]
 
-        # --- Learned Relevance Gate ---
-        # "Is this anchor actually useful for predicting the masked token?"
-        # Projects both into a shared low-dim space, computes scaled dot product
+        # --- Learned Relevance Gate (per anchor-mask pair) ---
         q = self.q_proj(h_mask)                                      # [N, d_proj]
         k = self.k_proj(h_anchor)                                    # [N, d_proj]
-        # (q * k) = element-wise multiply [N, d_proj], .sum(dim=-1) = dot product -> [N]
-        # keepdim=True makes it [N, 1] so it broadcasts with delta [N, d]
-        # sigmoid outputs 0-1: ~0 means "irrelevant anchor", ~1 means "useful anchor"
         relevance = torch.sigmoid(
             (q * k).sum(dim=-1, keepdim=True) / (self.d_proj ** 0.5)
         )                                                            # [N, 1]
-        return delta * relevance  # gate: irrelevant anchors produce near-zero corrections
+
+        # --- Confidence Gate (per mask position) ---
+        # "Does this position need correction at all?"
+        # Learns to suppress corrections where base model is already confident/correct
+        gate = torch.sigmoid(self.conf_gate(h_mask))                 # [N, 1]
+
+        return delta * relevance * gate
 
 
 # ============================================================
@@ -132,6 +126,10 @@ class AMIPRouterInference(nn.Module):
         self.experts = _make_experts(d_model, K)
         self.q_proj = nn.Linear(d_model, self.d_proj)
         self.k_proj = nn.Linear(d_model, self.d_proj)
+        # Confidence gate: same as training router — learns "does this position need correction?"
+        self.conf_gate = nn.Linear(d_model, 1)
+        nn.init.zeros_(self.conf_gate.weight)
+        nn.init.zeros_(self.conf_gate.bias)
 
     def forward(self, h_L, mask_indices, unmasked_indices, range_r=RANGE_R):
         delta_h = torch.zeros_like(h_L)  # [B, L, d] — output starts as all zeros
@@ -149,16 +147,14 @@ class AMIPRouterInference(nn.Module):
             dists = (m_idx.unsqueeze(1).float() - u_idx.unsqueeze(0).float()).abs()
             adj_mask = (dists > 0) & (dists <= range_r)  # [M, U]
 
-            # All (mask, anchor) pairs where adjacency holds
-            pair_m, pair_u = adj_mask.nonzero(as_tuple=True)  # indices into m_idx, u_idx
+            pair_m, pair_u = adj_mask.nonzero(as_tuple=True)
             if len(pair_m) == 0:
                 continue
 
-            # Gather hidden states for ALL pairs at once
             h_masks = h_L[b, m_idx[pair_m]]      # [P, d]
             h_anchors = h_L[b, u_idx[pair_u]]    # [P, d]
 
-            # --- Batched MoE: all pairs through experts in one shot ---
+            # --- Batched MoE ---
             weights = F.softmax(self.routing_net(h_masks), dim=-1)   # [P, K]
             conditioned = torch.cat([h_anchors, h_masks], dim=-1)    # [P, 2d]
             pair_deltas = sum(
@@ -172,7 +168,6 @@ class AMIPRouterInference(nn.Module):
             scores = (q * k).sum(dim=-1) / (self.d_proj ** 0.5)  # [P]
 
             # --- Per-mask-position softmax (vectorized via scatter) ---
-            # Stable softmax: subtract max per group, exp, normalize
             num_masks = len(m_idx)
             max_scores = torch.full((num_masks,), -1e9, device=scores.device, dtype=scores.dtype)
             max_scores.scatter_reduce_(0, pair_m, scores, reduce='amax')
@@ -188,6 +183,11 @@ class AMIPRouterInference(nn.Module):
                 m_idx[pair_m].unsqueeze(-1).expand_as(weighted_deltas),
                 weighted_deltas
             )
+
+            # --- Confidence gate: per mask position "should I correct at all?" ---
+            h_mask_positions = h_L[b, m_idx]  # [M, d]
+            gate = torch.sigmoid(self.conf_gate(h_mask_positions))  # [M, 1]
+            delta_h[b, m_idx] *= gate
 
         return delta_h
 
