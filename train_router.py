@@ -202,44 +202,93 @@ def train():
     optimizer = torch.optim.AdamW(router.parameters(), lr=5e-4, weight_decay=0.01, fused=True)
 
     # ------------------------------------------------------------------
-    # Dataset: wikitext-103 + GSM8K train + MATH train
-    # Mixed data teaches the router to handle both natural language
-    # and mathematical reasoning patterns.
+    # Dataset: balanced 3-way mix (~90K each = ~270K total)
+    #   1. Wiki (general language)
+    #   2. Math (GSM8K + MATH with solutions)
+    #   3. Diverse reasoning (SciQ + ECQA + CoS-E + OpenBookQA with explanations)
     # ------------------------------------------------------------------
     print("Loading datasets...")
 
-    # Wikitext-103
+    # --- Wiki (downsample to ~90K) ---
     wiki = load_dataset("Salesforce/wikitext", "wikitext-103-raw-v1")
-    wiki_train = wiki["train"].filter(lambda x: len(x["text"]) > 50)  # skip very short texts
+    wiki_train = wiki["train"].filter(lambda x: len(x["text"]) > 50)
     wiki_val = wiki["validation"].filter(lambda x: len(x["text"]) > 50)
-    print(f"  Wikitext train: {len(wiki_train)}")
+    wiki_train = wiki_train.select(range(min(90000, len(wiki_train))))
+    print(f"  Wiki train: {len(wiki_train)}")
 
-    # GSM8K train split — format: question + answer as "text"
+    # --- Math (GSM8K + MATH, 6x upsample → ~90K) ---
     gsm8k = load_dataset("openai/gsm8k", "main", split="train")
     gsm8k = gsm8k.map(lambda x: {"text": f"Question: {x['question']}\nAnswer: {x['answer']}"})
     gsm8k = gsm8k.remove_columns([c for c in gsm8k.column_names if c != "text"])
-    print(f"  GSM8K train: {len(gsm8k)}")
 
-    # MATH train split (load all subjects from EleutherAI mirror)
     math_subjects = ["algebra", "counting_and_probability", "geometry",
                      "intermediate_algebra", "number_theory", "prealgebra", "precalculus"]
     math_parts = [load_dataset("EleutherAI/hendrycks_math", subj, split="train") for subj in math_subjects]
     math_ds = concatenate_datasets(math_parts)
     math_ds = math_ds.map(lambda x: {"text": f"Problem: {x['problem']}\nSolution: {x['solution']}"})
     math_ds = math_ds.remove_columns([c for c in math_ds.column_names if c != "text"])
-    print(f"  MATH train: {len(math_ds)}")
 
-    # Oversample math data so it's ~50% of training
-    # Wiki ~180K, GSM8K ~7.5K x 12 = ~90K, MATH ~7.5K x 12 = ~90K
-    # Total ~360K — without oversampling, math would be only ~4%
-    math_repeat = 12
-    gsm8k_up = concatenate_datasets([gsm8k] * math_repeat)  # repeat dataset 12x
-    math_up = concatenate_datasets([math_ds] * math_repeat)
-    train_data = concatenate_datasets([wiki_train, gsm8k_up, math_up])  # merge all into one
+    math_combined = concatenate_datasets([gsm8k, math_ds])
+    math_repeat = 6
+    math_up = concatenate_datasets([math_combined] * math_repeat)
+    print(f"  Math: GSM8K {len(gsm8k)} + MATH {len(math_ds)} = {len(math_combined)} x {math_repeat} = {len(math_up)}")
+
+    # --- Diverse reasoning (SciQ + ECQA + CoS-E + OpenBookQA, ~3x upsample → ~90K) ---
+    # All formatted with CoT (question + explanation + answer) for long sequences
+
+    # SciQ: science questions with supporting evidence
+    sciq = load_dataset("allenai/sciq", split="train")
+    sciq = sciq.map(lambda x: {"text": (
+        f"Question: {x['question']}\n"
+        f"(A) {x['correct_answer']} (B) {x['distractor1']} "
+        f"(C) {x['distractor2']} (D) {x['distractor3']}\n"
+        f"Let's think step by step. {x['support']}\n"
+        f"Therefore the answer is (A)."
+    )})
+    sciq = sciq.remove_columns([c for c in sciq.column_names if c != "text"])
+
+    # ECQA: commonsense QA with positive + negative reasoning
+    ecqa = load_dataset("tasksource/ecqa", split="train")
+    ecqa = ecqa.map(lambda x: {"text": (
+        f"Question: {x['q_text']}\n"
+        f"(1) {x['q_op1']} (2) {x['q_op2']} (3) {x['q_op3']} "
+        f"(4) {x['q_op4']} (5) {x['q_op5']}\n"
+        f"Let's think step by step. {x['taskB']}\n"
+        f"Therefore the answer is {x['q_ans']}."
+    )})
+    ecqa = ecqa.remove_columns([c for c in ecqa.column_names if c != "text"])
+
+    # CoS-E: common sense explanations (abstractive)
+    cose = load_dataset("Salesforce/cos_e", "v1.11", split="train")
+    cose = cose.map(lambda x: {"text": (
+        f"Question: {x['question']}\n"
+        f"Choices: {', '.join(x['choices'])}\n"
+        f"Let's think step by step. {x['abstractive_explanation']}\n"
+        f"Therefore the answer is {x['answer']}."
+    )})
+    cose = cose.remove_columns([c for c in cose.column_names if c != "text"])
+
+    # OpenBookQA: science MCQ with supporting fact
+    obqa = load_dataset("allenai/openbookqa", "additional", split="train")
+    obqa = obqa.map(lambda x: {"text": (
+        f"Question: {x['question_stem']}\n"
+        + "\n".join(f"{l}) {t}" for l, t in zip(x['choices']['label'], x['choices']['text']))
+        + f"\nLet's think step by step. {x['fact1']}\n"
+        f"Therefore the answer is {x['answerKey']}."
+    )})
+    obqa = obqa.remove_columns([c for c in obqa.column_names if c != "text"])
+
+    diverse = concatenate_datasets([sciq, ecqa, cose, obqa])
+    diverse_repeat = 3
+    diverse_up = concatenate_datasets([diverse] * diverse_repeat)
+    print(f"  Diverse: SciQ {len(sciq)} + ECQA {len(ecqa)} + CoS-E {len(cose)} + OBQA {len(obqa)} "
+          f"= {len(diverse)} x {diverse_repeat} = {len(diverse_up)}")
+
+    # --- Combine all three categories ---
+    train_data = concatenate_datasets([wiki_train, math_up, diverse_up])
     val_data = wiki_val
-    print(f"  GSM8K upsampled: {len(gsm8k)} x {math_repeat} = {len(gsm8k_up)}")
-    print(f"  MATH upsampled:  {len(math_ds)} x {math_repeat} = {len(math_up)}")
-    print(f"  Combined train:  {len(train_data)} (~50% math)")
+    print(f"  Total train: {len(train_data)} "
+          f"(Wiki {len(wiki_train)} | Math {len(math_up)} | Diverse {len(diverse_up)})")
 
     def collate_fn(batch):
         """Tokenize a batch of text strings into padded tensors."""
