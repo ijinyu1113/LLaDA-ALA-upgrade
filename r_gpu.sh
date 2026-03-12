@@ -54,6 +54,7 @@ echo "========================================="
 
 # Step 1: Retrain router with diverse data (wiki + math + SciQ/ECQA/CoS-E/OBQA)
 time srun python3 /u/iyu1/nim_game_project/llada/train_router.py && \
-# Step 2: Eval all benchmarks at inference α=0.02
-time srun python3 /u/iyu1/nim_game_project/llada/run_benchmarks.py --benchmarks arc gpqa bbh math gsm8k
+# Step 2: Eval all benchmarks — direct + CoT for MCQ, primary for math
+time srun python3 /u/iyu1/nim_game_project/llada/run_benchmarks.py \
+    --benchmarks math gsm8k sciq sciq_cot obqa obqa_cot gpqa gpqa_cot arc arc_cot bbh bbh_cot
 

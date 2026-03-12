@@ -5,6 +5,7 @@ from datasets import load_dataset, concatenate_datasets
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import time
+import random
 import functools
 from models import AMIPRouterTrain, ALPHA_BASE, ALPHA_SCALE, MASK_TOKEN_ID, RANGE_R
 # functools.partial wraps print so flush=True is always passed
@@ -236,15 +237,22 @@ def train():
     # --- Diverse reasoning (SciQ + ECQA + CoS-E + OpenBookQA, ~3x upsample → ~90K) ---
     # All formatted with CoT (question + explanation + answer) for long sequences
 
-    # SciQ: science questions with supporting evidence
+    # SciQ: science questions with supporting evidence (shuffle choices per sample)
     sciq = load_dataset("allenai/sciq", split="train")
-    sciq = sciq.map(lambda x: {"text": (
-        f"Question: {x['question']}\n"
-        f"(A) {x['correct_answer']} (B) {x['distractor1']} "
-        f"(C) {x['distractor2']} (D) {x['distractor3']}\n"
-        f"Let's think step by step. {x['support']}\n"
-        f"Therefore the answer is (A)."
-    )})
+    def _format_sciq(x, idx):
+        labels = ["A", "B", "C", "D"]
+        choices = [(x["correct_answer"], True), (x["distractor1"], False),
+                   (x["distractor2"], False), (x["distractor3"], False)]
+        rng = random.Random(idx)
+        rng.shuffle(choices)
+        gold_label = next(labels[i] for i, (_, c) in enumerate(choices) if c)
+        choice_str = " ".join(f"({labels[i]}) {t}" for i, (t, _) in enumerate(choices))
+        return {"text": (
+            f"Question: {x['question']}\n{choice_str}\n"
+            f"Let's think step by step. {x['support']}\n"
+            f"Therefore the answer is ({gold_label})."
+        )}
+    sciq = sciq.map(_format_sciq, with_indices=True)
     sciq = sciq.remove_columns([c for c in sciq.column_names if c != "text"])
 
     # ECQA: commonsense QA with positive + negative reasoning

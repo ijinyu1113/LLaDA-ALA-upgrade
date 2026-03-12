@@ -13,6 +13,7 @@ Usage:
 import argparse
 import json
 import os
+import random
 import re
 import sys
 import tempfile
@@ -504,13 +505,240 @@ def eval_bbh(model, tokenizer, args):
 
 
 # ============================================================
+# ARC-Challenge CoT (n=200)
+# ============================================================
+
+@torch.no_grad()
+def eval_arc_cot(model, tokenizer, args, n=200):
+    print(f"\n{'='*60}", flush=True)
+    print(f"ARC-Challenge CoT (n={n}, α={INFERENCE_ALPHA})", flush=True)
+    print(f"{'='*60}", flush=True)
+
+    dataset = load_dataset("allenai/ai2_arc", "ARC-Challenge", split="test")
+    items = []
+    for idx in range(min(n, len(dataset))):
+        sample = dataset[idx]
+        choices = sample["choices"]
+        choice_lines = [f"{label}) {text}"
+                        for label, text in zip(choices["label"], choices["text"])]
+        prompt = (f"Question: {sample['question']}\n"
+                  f"{chr(10).join(choice_lines)}\n\n"
+                  f"Let's think step by step.")
+        ids = tokenizer(prompt, return_tensors="pt", truncation=True,
+                        max_length=512)["input_ids"].to(model.device)
+        items.append((idx, ids, sample["answerKey"].upper(), {}))
+
+    print(f"  Valid samples: {len(items)}", flush=True)
+    return _run_eval_loop(items, model, tokenizer, args, "arc_cot",
+                          extract_fn=extract_answer_arc,
+                          match_fn=lambda p, g: p == g,
+                          gen_length=256, steps=256, progress_every=50)
+
+
+# ============================================================
+# BBH CoT — hardest subtasks (n~200 total)
+# ============================================================
+
+@torch.no_grad()
+def eval_bbh_cot(model, tokenizer, args):
+    print(f"\n{'='*60}", flush=True)
+    print(f"BBH Hard Subtasks CoT (α={INFERENCE_ALPHA})", flush=True)
+    print(f"{'='*60}", flush=True)
+
+    items = []
+    subtask_ranges = {}
+    for subtask in BBH_HARD_SUBTASKS:
+        try:
+            ds = load_dataset("lukaemon/bbh", subtask, split="test")
+        except Exception as e:
+            print(f"  WARNING: Could not load {subtask}: {e}")
+            continue
+
+        shots = []
+        for i in range(min(3, len(ds))):
+            shots.append(f"Q: {ds[i]['input']}\nA: Let's think step by step. {ds[i]['target']}")
+        shot_text = "\n\n".join(shots) + "\n\n" if shots else ""
+
+        start_idx = 3
+        per_subtask = 33
+        subtask_start = len(items)
+
+        for j in range(start_idx, min(start_idx + per_subtask, len(ds))):
+            global_idx = len(items)
+            prompt = f"{shot_text}Q: {ds[j]['input']}\nA: Let's think step by step."
+            ids = tokenizer(prompt, return_tensors="pt", truncation=True,
+                            max_length=512)["input_ids"].to(model.device)
+            gold = ds[j]["target"].strip()
+            items.append((global_idx, ids, gold, {"subtask": subtask}))
+
+        subtask_ranges[subtask] = (subtask_start, len(items))
+        print(f"  {subtask}: {len(items) - subtask_start} samples (3-shot CoT)")
+
+    print(f"  Total samples: {len(items)}", flush=True)
+
+    def match_bbh(pred, gold):
+        return pred.strip().lower() == gold.strip().lower()
+
+    result = _run_eval_loop(items, model, tokenizer, args, "bbh_cot",
+                            extract_fn=lambda text: text.strip().split("\n")[-1].strip(),
+                            match_fn=match_bbh,
+                            gen_length=256, steps=256, progress_every=30)
+
+    per_sample = result.get("per_sample", {})
+    print(f"\n  BBH CoT by Subtask:")
+    print(f"  {'Subtask':<45} | {'N':>4} | {'Base':>8} | {'Router':>8} | {'Delta':>7}")
+    print(f"  {'-'*80}")
+    for subtask, (s, e) in subtask_ranges.items():
+        indices = [str(i) for i in range(s, e)]
+        n_sub, b_c, r_c = 0, 0, 0
+        for si in indices:
+            if si in per_sample and "correct_baseline" in per_sample[si]:
+                n_sub += 1
+                b_c += int(per_sample[si].get("correct_baseline", False))
+                r_c += int(per_sample[si].get("correct_router", False))
+        if n_sub > 0:
+            print(f"  {subtask:<45} | {n_sub:>4} | {b_c/n_sub:>7.0%} | {r_c/n_sub:>7.0%} | {(r_c-b_c)/n_sub:>+6.0%}")
+
+    return result
+
+
+# ============================================================
+# SciQ (n=200, trained domain)
+# ============================================================
+
+def _sciq_shuffle_choices(sample, seed):
+    """Shuffle SciQ choices deterministically, return (choice_lines, gold_label)."""
+    labels = ["A", "B", "C", "D"]
+    choices = [
+        (sample["correct_answer"], True),
+        (sample["distractor1"], False),
+        (sample["distractor2"], False),
+        (sample["distractor3"], False),
+    ]
+    rng = random.Random(seed)
+    rng.shuffle(choices)
+    gold = next(labels[i] for i, (_, is_correct) in enumerate(choices) if is_correct)
+    lines = " ".join(f"({labels[i]}) {text}" for i, (text, _) in enumerate(choices))
+    return lines, gold
+
+
+@torch.no_grad()
+def eval_sciq(model, tokenizer, args, n=200):
+    print(f"\n{'='*60}", flush=True)
+    print(f"SciQ Direct (n={n}, α={INFERENCE_ALPHA})", flush=True)
+    print(f"{'='*60}", flush=True)
+
+    dataset = load_dataset("allenai/sciq", split="test")
+    items = []
+    for idx in range(min(n, len(dataset))):
+        sample = dataset[idx]
+        choices_str, gold = _sciq_shuffle_choices(sample, seed=idx)
+        prompt = (f"Question: {sample['question']}\n"
+                  f"{choices_str}\n\n"
+                  f"Answer:")
+        ids = tokenizer(prompt, return_tensors="pt", truncation=True,
+                        max_length=512)["input_ids"].to(model.device)
+        items.append((idx, ids, gold, {}))
+
+    print(f"  Valid samples: {len(items)}", flush=True)
+    return _run_eval_loop(items, model, tokenizer, args, "sciq",
+                          extract_fn=extract_answer_arc,
+                          match_fn=lambda p, g: p == g,
+                          gen_length=32, steps=32, progress_every=50)
+
+
+@torch.no_grad()
+def eval_sciq_cot(model, tokenizer, args, n=200):
+    print(f"\n{'='*60}", flush=True)
+    print(f"SciQ CoT (n={n}, α={INFERENCE_ALPHA})", flush=True)
+    print(f"{'='*60}", flush=True)
+
+    dataset = load_dataset("allenai/sciq", split="test")
+    items = []
+    for idx in range(min(n, len(dataset))):
+        sample = dataset[idx]
+        choices_str, gold = _sciq_shuffle_choices(sample, seed=idx)
+        prompt = (f"Question: {sample['question']}\n"
+                  f"{choices_str}\n\n"
+                  f"Let's think step by step.")
+        ids = tokenizer(prompt, return_tensors="pt", truncation=True,
+                        max_length=512)["input_ids"].to(model.device)
+        items.append((idx, ids, gold, {}))
+
+    print(f"  Valid samples: {len(items)}", flush=True)
+    return _run_eval_loop(items, model, tokenizer, args, "sciq_cot",
+                          extract_fn=extract_answer_arc,
+                          match_fn=lambda p, g: p == g,
+                          gen_length=256, steps=256, progress_every=50)
+
+
+# ============================================================
+# OpenBookQA (n=200, trained domain)
+# ============================================================
+
+@torch.no_grad()
+def eval_obqa(model, tokenizer, args, n=200):
+    print(f"\n{'='*60}", flush=True)
+    print(f"OpenBookQA Direct (n={n}, α={INFERENCE_ALPHA})", flush=True)
+    print(f"{'='*60}", flush=True)
+
+    dataset = load_dataset("allenai/openbookqa", "additional", split="test")
+    items = []
+    for idx in range(min(n, len(dataset))):
+        sample = dataset[idx]
+        choices = sample["choices"]
+        choice_lines = [f"{label}) {text}"
+                        for label, text in zip(choices["label"], choices["text"])]
+        prompt = (f"Question: {sample['question_stem']}\n"
+                  f"{chr(10).join(choice_lines)}\n\n"
+                  f"Answer:")
+        ids = tokenizer(prompt, return_tensors="pt", truncation=True,
+                        max_length=512)["input_ids"].to(model.device)
+        items.append((idx, ids, sample["answerKey"].upper(), {}))
+
+    print(f"  Valid samples: {len(items)}", flush=True)
+    return _run_eval_loop(items, model, tokenizer, args, "obqa",
+                          extract_fn=extract_answer_arc,
+                          match_fn=lambda p, g: p == g,
+                          gen_length=32, steps=32, progress_every=50)
+
+
+@torch.no_grad()
+def eval_obqa_cot(model, tokenizer, args, n=200):
+    print(f"\n{'='*60}", flush=True)
+    print(f"OpenBookQA CoT (n={n}, α={INFERENCE_ALPHA})", flush=True)
+    print(f"{'='*60}", flush=True)
+
+    dataset = load_dataset("allenai/openbookqa", "additional", split="test")
+    items = []
+    for idx in range(min(n, len(dataset))):
+        sample = dataset[idx]
+        choices = sample["choices"]
+        choice_lines = [f"{label}) {text}"
+                        for label, text in zip(choices["label"], choices["text"])]
+        prompt = (f"Question: {sample['question_stem']}\n"
+                  f"{chr(10).join(choice_lines)}\n\n"
+                  f"Let's think step by step.")
+        ids = tokenizer(prompt, return_tensors="pt", truncation=True,
+                        max_length=512)["input_ids"].to(model.device)
+        items.append((idx, ids, sample["answerKey"].upper(), {}))
+
+    print(f"  Valid samples: {len(items)}", flush=True)
+    return _run_eval_loop(items, model, tokenizer, args, "obqa_cot",
+                          extract_fn=extract_answer_arc,
+                          match_fn=lambda p, g: p == g,
+                          gen_length=256, steps=256, progress_every=50)
+
+
+# ============================================================
 # Main
 # ============================================================
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Scaled benchmark evaluation for ALA-LLaDA")
     parser.add_argument("--benchmarks", nargs="+",
-                        choices=["gsm8k", "math", "arc", "gpqa", "gpqa_cot", "bbh"],
+                        choices=["gsm8k", "math", "arc", "arc_cot", "gpqa", "gpqa_cot",
+                                 "bbh", "bbh_cot", "sciq", "sciq_cot", "obqa", "obqa_cot"],
                         default=["gsm8k", "math", "arc", "gpqa", "bbh"],
                         help="Which benchmarks to run")
     parser.add_argument("--checkpoint-dir", default="checkpoints",
@@ -541,7 +769,10 @@ if __name__ == "__main__":
 
     # Run order: fast first (ARC, GPQA, BBH), then longer (MATH, GSM8K)
     run_order = []
-    for b in ["arc", "gpqa", "gpqa_cot", "bbh", "math", "gsm8k"]:
+    # Run order: fast direct first, then CoT (longer gen), then long benchmarks
+    for b in ["arc", "sciq", "obqa", "gpqa", "bbh",
+              "arc_cot", "sciq_cot", "obqa_cot", "gpqa_cot", "bbh_cot",
+              "math", "gsm8k"]:
         if b in args.benchmarks:
             run_order.append(b)
 
@@ -549,9 +780,15 @@ if __name__ == "__main__":
         "gsm8k": lambda: eval_gsm8k(model, tokenizer, args),
         "math": lambda: eval_math(model, tokenizer, args),
         "arc": lambda: eval_arc(model, tokenizer, args),
+        "arc_cot": lambda: eval_arc_cot(model, tokenizer, args),
         "gpqa": lambda: eval_gpqa(model, tokenizer, args),
         "gpqa_cot": lambda: eval_gpqa_cot(model, tokenizer, args),
         "bbh": lambda: eval_bbh(model, tokenizer, args),
+        "bbh_cot": lambda: eval_bbh_cot(model, tokenizer, args),
+        "sciq": lambda: eval_sciq(model, tokenizer, args),
+        "sciq_cot": lambda: eval_sciq_cot(model, tokenizer, args),
+        "obqa": lambda: eval_obqa(model, tokenizer, args),
+        "obqa_cot": lambda: eval_obqa_cot(model, tokenizer, args),
     }
 
     for benchmark in run_order:
