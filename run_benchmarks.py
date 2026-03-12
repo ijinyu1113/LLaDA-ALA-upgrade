@@ -345,18 +345,17 @@ def eval_gpqa(model, tokenizer, args):
     items = []
     for idx in range(len(dataset)):
         sample = dataset[idx]
+        # Fields: 'problem' (question + choices), 'solution' (\boxed{A/B/C/D})
         prompt = (f"Answer this graduate-level question. "
                   f"Put your final answer in \\boxed{{}}.\n\n"
-                  f"Question: {sample['Question']}\n"
-                  f"(A) {sample['choice_A']}\n"
-                  f"(B) {sample['choice_B']}\n"
-                  f"(C) {sample['choice_C']}\n"
-                  f"(D) {sample['choice_D']}\n\n"
+                  f"{sample['problem']}\n\n"
                   f"Answer:")
         ids = tokenizer(prompt, return_tensors="pt", truncation=True,
                         max_length=512)["input_ids"].to(model.device)
-        gold = sample["answer"]  # "A", "B", "C", or "D"
-        items.append((idx, ids, gold.upper(), {}))
+        gold = extract_boxed(sample["solution"]).upper()  # "A", "B", "C", or "D"
+        if not gold:
+            continue
+        items.append((idx, ids, gold, {}))
 
     def extract_gpqa(text):
         boxed = extract_boxed(text)
