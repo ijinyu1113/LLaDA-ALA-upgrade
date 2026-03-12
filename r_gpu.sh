@@ -52,6 +52,6 @@ print(f'BF16 supported? {torch.cuda.is_bf16_supported()}')
 "
 echo "========================================="
 
-# Router already trained — eval remaining benchmarks at inference α=0.02
-time srun python3 /u/iyu1/nim_game_project/llada/run_benchmarks.py --benchmarks gpqa bbh gsm8k math --resume
+# GPQA CoT test — does LLaDA produce sensible CoT? Does ALA help more with longer generation?
+time srun python3 /u/iyu1/nim_game_project/llada/run_benchmarks.py --benchmarks gpqa_cot
 

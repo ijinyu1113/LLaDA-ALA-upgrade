@@ -377,6 +377,52 @@ def eval_gpqa(model, tokenizer, args):
 
 
 # ============================================================
+# GPQA Diamond CoT (n=198, longer generation with reasoning)
+# ============================================================
+
+def _extract_gpqa_answer(text):
+    """Shared GPQA answer extraction — boxed, then (X), then bare letter."""
+    boxed = extract_boxed(text)
+    if boxed:
+        match = re.search(r'([A-D])', boxed.upper())
+        if match:
+            return match.group(1)
+    match = re.search(r'\(([A-D])\)', text.upper())
+    if match:
+        return match.group(1)
+    match = re.search(r'([A-D])', text.upper())
+    return match.group(1) if match else ""
+
+
+@torch.no_grad()
+def eval_gpqa_cot(model, tokenizer, args):
+    print(f"\n{'='*60}", flush=True)
+    print(f"GPQA Diamond CoT (α={INFERENCE_ALPHA})", flush=True)
+    print(f"{'='*60}", flush=True)
+
+    dataset = load_dataset("hendrydong/gpqa_diamond_mc", split="test")
+    items = []
+    for idx in range(len(dataset)):
+        sample = dataset[idx]
+        prompt = (f"Answer this graduate-level question. "
+                  f"Think step by step, then put your final answer in \\boxed{{}}.\n\n"
+                  f"{sample['problem']}\n\n"
+                  f"Let's think step by step.")
+        ids = tokenizer(prompt, return_tensors="pt", truncation=True,
+                        max_length=512)["input_ids"].to(model.device)
+        gold = extract_boxed(sample["solution"]).upper()
+        if not gold:
+            continue
+        items.append((idx, ids, gold, {}))
+
+    print(f"  Valid samples: {len(items)}", flush=True)
+    return _run_eval_loop(items, model, tokenizer, args, "gpqa_cot",
+                          extract_fn=_extract_gpqa_answer,
+                          match_fn=lambda p, g: p == g,
+                          gen_length=256, steps=256, progress_every=50)
+
+
+# ============================================================
 # BBH — hardest subtasks (n~200 total)
 # ============================================================
 
@@ -464,7 +510,7 @@ def eval_bbh(model, tokenizer, args):
 def parse_args():
     parser = argparse.ArgumentParser(description="Scaled benchmark evaluation for ALA-LLaDA")
     parser.add_argument("--benchmarks", nargs="+",
-                        choices=["gsm8k", "math", "arc", "gpqa", "bbh"],
+                        choices=["gsm8k", "math", "arc", "gpqa", "gpqa_cot", "bbh"],
                         default=["gsm8k", "math", "arc", "gpqa", "bbh"],
                         help="Which benchmarks to run")
     parser.add_argument("--checkpoint-dir", default="checkpoints",
@@ -495,7 +541,7 @@ if __name__ == "__main__":
 
     # Run order: fast first (ARC, GPQA, BBH), then longer (MATH, GSM8K)
     run_order = []
-    for b in ["arc", "gpqa", "bbh", "math", "gsm8k"]:
+    for b in ["arc", "gpqa", "gpqa_cot", "bbh", "math", "gsm8k"]:
         if b in args.benchmarks:
             run_order.append(b)
 
@@ -504,6 +550,7 @@ if __name__ == "__main__":
         "math": lambda: eval_math(model, tokenizer, args),
         "arc": lambda: eval_arc(model, tokenizer, args),
         "gpqa": lambda: eval_gpqa(model, tokenizer, args),
+        "gpqa_cot": lambda: eval_gpqa_cot(model, tokenizer, args),
         "bbh": lambda: eval_bbh(model, tokenizer, args),
     }
 
