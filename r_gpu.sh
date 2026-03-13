@@ -52,20 +52,9 @@ print(f'BF16 supported? {torch.cuda.is_bf16_supported()}')
 "
 echo "========================================="
 
-# Run 1: Math-heavy router from scratch (~70 min)
-echo "=== RUN 1: Math-heavy router training ==="
-time srun python3 /u/iyu1/nim_game_project/llada/train_router.py \
-    --stage 1 --save-prefix amip_router_math && \
-
-# Run 2: Gate-only training, frozen experts (~35 min)
-echo "=== RUN 2: Gate-only training on balanced data ==="
-time srun python3 /u/iyu1/nim_game_project/llada/train_router.py \
-    --stage 2 --checkpoint amip_router_math_best.pt \
-    --save-prefix amip_router_gated && \
-
-# Run 3: Full eval (~2-3h)
-echo "=== RUN 3: Full evaluation ==="
+# Full eval on MATH + GSM8K with gated router
 time srun python3 /u/iyu1/nim_game_project/llada/run_benchmarks.py \
-    --benchmarks math gsm8k arc gpqa bbh \
+    --benchmarks math gsm8k \
+    -n 99999 \
     --weights amip_router_gated_best.pt --use-gate
 

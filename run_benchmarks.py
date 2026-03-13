@@ -549,6 +549,8 @@ def parse_args():
                         choices=["gsm8k", "math", "arc", "gpqa", "bbh", "sciq", "obqa"],
                         default=["gsm8k", "math", "arc", "gpqa", "bbh"],
                         help="Which benchmarks to run")
+    parser.add_argument("-n", type=int, default=None,
+                        help="Override sample count per benchmark (default: benchmark-specific)")
     parser.add_argument("--weights", type=str, default="amip_router_best.pt",
                         help="Path to router checkpoint")
     parser.add_argument("--use-gate", action="store_true",
@@ -585,14 +587,15 @@ if __name__ == "__main__":
         if b in args.benchmarks:
             run_order.append(b)
 
+    n = args.n  # None means use benchmark-specific defaults
     eval_fns = {
-        "gsm8k": lambda: eval_gsm8k(model, tokenizer, args),
-        "math": lambda: eval_math(model, tokenizer, args),
-        "arc": lambda: eval_arc(model, tokenizer, args),
+        "gsm8k": lambda: eval_gsm8k(model, tokenizer, args, n=n or 200),
+        "math": lambda: eval_math(model, tokenizer, args, n=n or 200),
+        "arc": lambda: eval_arc(model, tokenizer, args, n=n or 200),
         "gpqa": lambda: eval_gpqa(model, tokenizer, args),
         "bbh": lambda: eval_bbh(model, tokenizer, args),
-        "sciq": lambda: eval_sciq(model, tokenizer, args),
-        "obqa": lambda: eval_obqa(model, tokenizer, args),
+        "sciq": lambda: eval_sciq(model, tokenizer, args, n=n or 200),
+        "obqa": lambda: eval_obqa(model, tokenizer, args, n=n or 200),
     }
 
     for benchmark in run_order:
