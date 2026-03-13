@@ -10,7 +10,7 @@
 #SBATCH --mem=80G
 #SBATCH --gpus-per-node=1
 #SBATCH --gpu-bind=verbose,closest
-#SBATCH --time=24:00:00
+#SBATCH --time=06:00:00
 
 export OMP_NUM_THREADS=16
 export OPENBLAS_NUM_THREADS=16
@@ -52,9 +52,20 @@ print(f'BF16 supported? {torch.cuda.is_bf16_supported()}')
 "
 echo "========================================="
 
-# Step 1: Retrain router with diverse data (wiki + math + SciQ/ECQA/CoS-E/OBQA)
-time srun python3 /u/iyu1/nim_game_project/llada/train_router.py && \
-# Step 2: Eval all benchmarks — direct + CoT for MCQ, primary for math
+# Run 1: Math-heavy router from scratch (~70 min)
+echo "=== RUN 1: Math-heavy router training ==="
+time srun python3 /u/iyu1/nim_game_project/llada/train_router.py \
+    --stage 1 --save-prefix amip_router_math && \
+
+# Run 2: Gate-only training, frozen experts (~35 min)
+echo "=== RUN 2: Gate-only training on balanced data ==="
+time srun python3 /u/iyu1/nim_game_project/llada/train_router.py \
+    --stage 2 --checkpoint amip_router_math_best.pt \
+    --save-prefix amip_router_gated && \
+
+# Run 3: Full eval (~2-3h)
+echo "=== RUN 3: Full evaluation ==="
 time srun python3 /u/iyu1/nim_game_project/llada/run_benchmarks.py \
-    --benchmarks math gsm8k sciq sciq_cot obqa obqa_cot gpqa gpqa_cot arc arc_cot bbh bbh_cot
+    --benchmarks math gsm8k arc gpqa bbh \
+    --weights amip_router_gated_best.pt --use-gate
 

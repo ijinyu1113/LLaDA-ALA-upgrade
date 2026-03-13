@@ -1,3 +1,4 @@
+import argparse
 import torch
 import torch.nn.functional as F
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -175,10 +176,38 @@ def evaluate(router, base_llada, loader, device, mask_token_id=MASK_TOKEN_ID, al
 # =============================================================================
 # 5. MAIN TRAINING LOOP
 # =============================================================================
+def parse_train_args():
+    parser = argparse.ArgumentParser(description="Train ALA router (staged)")
+    parser.add_argument("--stage", type=int, default=1, choices=[1, 2],
+                        help="Stage 1: math-heavy from scratch, Stage 2: gate-only on balanced data")
+    parser.add_argument("--checkpoint", type=str, default=None,
+                        help="Path to load router checkpoint from (required for stage 2)")
+    parser.add_argument("--save-prefix", type=str, default="amip_router",
+                        help="Prefix for saved checkpoints (e.g. amip_router_math)")
+    return parser.parse_args()
+
+
 def train():
+    args = parse_train_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model_id = "GSAI-ML/LLaDA-8B-Instruct"
     mask_token_id = MASK_TOKEN_ID
+
+    # ------------------------------------------------------------------
+    # Stage-dependent config
+    # ------------------------------------------------------------------
+    if args.stage == 1:
+        use_gate = False
+        max_steps = 10000
+        lr = 5e-4
+        use_diverse = False  # math-heavy: Wiki 90K + GSM8K 12x + MATH 12x
+    elif args.stage == 2:
+        use_gate = True
+        max_steps = 5000
+        lr = 5e-4           # only gate params, can keep LR high
+        use_diverse = True   # balanced: Wiki 90K + Math 6x + Diverse 3x
+
+    print(f"Stage {args.stage}: use_gate={use_gate}, max_steps={max_steps}, lr={lr}, diverse={use_diverse}")
 
     # ------------------------------------------------------------------
     # Model & tokenizer
@@ -186,38 +215,60 @@ def train():
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
     base_llada = AutoModelForCausalLM.from_pretrained(
         model_id, trust_remote_code=True, device_map="auto",
-        torch_dtype=torch.bfloat16,  # load in half precision to save memory
+        torch_dtype=torch.bfloat16,
     )
-    base_llada.eval()  # always in eval mode — we never train the base model
+    base_llada.eval()
     for param in base_llada.parameters():
-        param.requires_grad_(False)  # no gradients for 8B params (saves ~16GB GPU memory)
+        param.requires_grad_(False)
 
     # ------------------------------------------------------------------
-    # Router — the only thing we train (~30M params vs 8B base)
+    # Router
     # ------------------------------------------------------------------
-    router = AMIPRouterTrain(d_model=4096, K=8).to(device).to(torch.bfloat16)
-    # torch.compile: JIT-compiles the router into optimized GPU kernels
-    # max-autotune: tries many kernel variants, picks the fastest (slow 1st run, fast after)
+    router = AMIPRouterTrain(d_model=4096, K=8, use_gate=use_gate).to(device).to(torch.bfloat16)
+
+    # Load checkpoint (required for stage 2)
+    if args.checkpoint:
+        state_dict = torch.load(args.checkpoint, map_location=device)
+        # Strip _orig_mod. prefix if saved from torch.compile
+        cleaned = {}
+        for k, v in state_dict.items():
+            cleaned[k.replace("_orig_mod.", "")] = v
+        missing, unexpected = router.load_state_dict(cleaned, strict=False)
+        print(f"  Loaded checkpoint: {args.checkpoint}")
+        if missing:
+            print(f"  Missing keys (newly added): {missing}")
+        if unexpected:
+            print(f"  Unexpected keys: {unexpected}")
+
+    # Stage 2: freeze everything except conf_gate
+    if args.stage == 2:
+        for name, param in router.named_parameters():
+            if "conf_gate" not in name:
+                param.requires_grad_(False)
+        trainable = sum(p.numel() for p in router.parameters() if p.requires_grad)
+        total = sum(p.numel() for p in router.parameters())
+        print(f"  Stage 2: {trainable} trainable / {total} total params")
+
+    # Compile AFTER checkpoint load + freeze
     router = torch.compile(router, mode="max-autotune")
-    # fused=True: optimizer step runs in one GPU kernel instead of many (fewer memory round-trips)
-    optimizer = torch.optim.AdamW(router.parameters(), lr=5e-4, weight_decay=0.01, fused=True)
+    optimizer = torch.optim.AdamW(
+        [p for p in router.parameters() if p.requires_grad],
+        lr=lr, weight_decay=0.01, fused=True
+    )
 
     # ------------------------------------------------------------------
-    # Dataset: balanced 3-way mix (~90K each = ~270K total)
-    #   1. Wiki (general language)
-    #   2. Math (GSM8K + MATH with solutions)
-    #   3. Diverse reasoning (SciQ + ECQA + CoS-E + OpenBookQA with explanations)
+    # Dataset loading
     # ------------------------------------------------------------------
     print("Loading datasets...")
 
-    # --- Wiki (downsample to ~90K) ---
+    # --- Wiki (always included, downsample to ~90K) ---
     wiki = load_dataset("Salesforce/wikitext", "wikitext-103-raw-v1")
     wiki_train = wiki["train"].filter(lambda x: len(x["text"]) > 50)
     wiki_val = wiki["validation"].filter(lambda x: len(x["text"]) > 50)
     wiki_train = wiki_train.select(range(min(90000, len(wiki_train))))
     print(f"  Wiki train: {len(wiki_train)}")
 
-    # --- Math (GSM8K + MATH, 6x upsample → ~90K) ---
+    # --- Math ---
     gsm8k = load_dataset("openai/gsm8k", "main", split="train")
     gsm8k = gsm8k.map(lambda x: {"text": f"Question: {x['question']}\nAnswer: {x['answer']}"})
     gsm8k = gsm8k.remove_columns([c for c in gsm8k.column_names if c != "text"])
@@ -230,73 +281,83 @@ def train():
     math_ds = math_ds.remove_columns([c for c in math_ds.column_names if c != "text"])
 
     math_combined = concatenate_datasets([gsm8k, math_ds])
-    math_repeat = 6
-    math_up = concatenate_datasets([math_combined] * math_repeat)
-    print(f"  Math: GSM8K {len(gsm8k)} + MATH {len(math_ds)} = {len(math_combined)} x {math_repeat} = {len(math_up)}")
 
-    # --- Diverse reasoning (SciQ + ECQA + CoS-E + OpenBookQA, ~3x upsample → ~90K) ---
-    # All formatted with CoT (question + explanation + answer) for long sequences
+    if use_diverse:
+        # Stage 2: balanced mix — Math 6x (~90K)
+        math_repeat = 6
+    else:
+        # Stage 1: math-heavy — GSM8K 12x + MATH 12x (separate upsampling)
+        math_repeat = 12
 
-    # SciQ: science questions with supporting evidence (shuffle choices per sample)
-    sciq = load_dataset("allenai/sciq", split="train")
-    def _format_sciq(x, idx):
-        labels = ["A", "B", "C", "D"]
-        choices = [(x["correct_answer"], True), (x["distractor1"], False),
-                   (x["distractor2"], False), (x["distractor3"], False)]
-        rng = random.Random(idx)
-        rng.shuffle(choices)
-        gold_label = next(labels[i] for i, (_, c) in enumerate(choices) if c)
-        choice_str = " ".join(f"({labels[i]}) {t}" for i, (t, _) in enumerate(choices))
-        return {"text": (
-            f"Question: {x['question']}\n{choice_str}\n"
-            f"Let's think step by step. {x['support']}\n"
-            f"Therefore the answer is ({gold_label})."
-        )}
-    sciq = sciq.map(_format_sciq, with_indices=True)
-    sciq = sciq.remove_columns([c for c in sciq.column_names if c != "text"])
+    if not use_diverse:
+        # Stage 1: upsample GSM8K and MATH separately at 12x each
+        gsm8k_up = concatenate_datasets([gsm8k] * math_repeat)
+        math_ds_up = concatenate_datasets([math_ds] * math_repeat)
+        math_up = concatenate_datasets([gsm8k_up, math_ds_up])
+        print(f"  Math: GSM8K {len(gsm8k)} x {math_repeat} + MATH {len(math_ds)} x {math_repeat} = {len(math_up)}")
+    else:
+        # Stage 2: combined 6x
+        math_up = concatenate_datasets([math_combined] * math_repeat)
+        print(f"  Math: GSM8K {len(gsm8k)} + MATH {len(math_ds)} = {len(math_combined)} x {math_repeat} = {len(math_up)}")
 
-    # ECQA: commonsense QA with positive + negative reasoning
-    ecqa = load_dataset("tasksource/ecqa", split="train")
-    ecqa = ecqa.map(lambda x: {"text": (
-        f"Question: {x['q_text']}\n"
-        f"(1) {x['q_op1']} (2) {x['q_op2']} (3) {x['q_op3']} "
-        f"(4) {x['q_op4']} (5) {x['q_op5']}\n"
-        f"Let's think step by step. {x['taskB']}\n"
-        f"Therefore the answer is {x['q_ans']}."
-    )})
-    ecqa = ecqa.remove_columns([c for c in ecqa.column_names if c != "text"])
+    if use_diverse:
+        # --- Diverse reasoning (SciQ + ECQA + CoS-E + OpenBookQA, ~3x upsample → ~90K) ---
+        sciq = load_dataset("allenai/sciq", split="train")
+        def _format_sciq(x, idx):
+            labels = ["A", "B", "C", "D"]
+            choices = [(x["correct_answer"], True), (x["distractor1"], False),
+                       (x["distractor2"], False), (x["distractor3"], False)]
+            rng = random.Random(idx)
+            rng.shuffle(choices)
+            gold_label = next(labels[i] for i, (_, c) in enumerate(choices) if c)
+            choice_str = " ".join(f"({labels[i]}) {t}" for i, (t, _) in enumerate(choices))
+            return {"text": (
+                f"Question: {x['question']}\n{choice_str}\n"
+                f"Let's think step by step. {x['support']}\n"
+                f"Therefore the answer is ({gold_label})."
+            )}
+        sciq = sciq.map(_format_sciq, with_indices=True)
+        sciq = sciq.remove_columns([c for c in sciq.column_names if c != "text"])
 
-    # CoS-E: common sense explanations (abstractive)
-    cose = load_dataset("Salesforce/cos_e", "v1.11", split="train")
-    cose = cose.map(lambda x: {"text": (
-        f"Question: {x['question']}\n"
-        f"Choices: {', '.join(x['choices'])}\n"
-        f"Let's think step by step. {x['abstractive_explanation']}\n"
-        f"Therefore the answer is {x['answer']}."
-    )})
-    cose = cose.remove_columns([c for c in cose.column_names if c != "text"])
+        ecqa = load_dataset("tasksource/ecqa", split="train")
+        ecqa = ecqa.map(lambda x: {"text": (
+            f"Question: {x['q_text']}\n"
+            f"(1) {x['q_op1']} (2) {x['q_op2']} (3) {x['q_op3']} "
+            f"(4) {x['q_op4']} (5) {x['q_op5']}\n"
+            f"Let's think step by step. {x['taskB']}\n"
+            f"Therefore the answer is {x['q_ans']}."
+        )})
+        ecqa = ecqa.remove_columns([c for c in ecqa.column_names if c != "text"])
 
-    # OpenBookQA: science MCQ with supporting fact
-    obqa = load_dataset("allenai/openbookqa", "additional", split="train")
-    obqa = obqa.map(lambda x: {"text": (
-        f"Question: {x['question_stem']}\n"
-        + "\n".join(f"{l}) {t}" for l, t in zip(x['choices']['label'], x['choices']['text']))
-        + f"\nLet's think step by step. {x['fact1']}\n"
-        f"Therefore the answer is {x['answerKey']}."
-    )})
-    obqa = obqa.remove_columns([c for c in obqa.column_names if c != "text"])
+        cose = load_dataset("Salesforce/cos_e", "v1.11", split="train")
+        cose = cose.map(lambda x: {"text": (
+            f"Question: {x['question']}\n"
+            f"Choices: {', '.join(x['choices'])}\n"
+            f"Let's think step by step. {x['abstractive_explanation']}\n"
+            f"Therefore the answer is {x['answer']}."
+        )})
+        cose = cose.remove_columns([c for c in cose.column_names if c != "text"])
 
-    diverse = concatenate_datasets([sciq, ecqa, cose, obqa])
-    diverse_repeat = 3
-    diverse_up = concatenate_datasets([diverse] * diverse_repeat)
-    print(f"  Diverse: SciQ {len(sciq)} + ECQA {len(ecqa)} + CoS-E {len(cose)} + OBQA {len(obqa)} "
-          f"= {len(diverse)} x {diverse_repeat} = {len(diverse_up)}")
+        obqa = load_dataset("allenai/openbookqa", "additional", split="train")
+        obqa = obqa.map(lambda x: {"text": (
+            f"Question: {x['question_stem']}\n"
+            + "\n".join(f"{l}) {t}" for l, t in zip(x['choices']['label'], x['choices']['text']))
+            + f"\nLet's think step by step. {x['fact1']}\n"
+            f"Therefore the answer is {x['answerKey']}."
+        )})
+        obqa = obqa.remove_columns([c for c in obqa.column_names if c != "text"])
 
-    # --- Combine all three categories ---
-    train_data = concatenate_datasets([wiki_train, math_up, diverse_up])
+        diverse = concatenate_datasets([sciq, ecqa, cose, obqa])
+        diverse_repeat = 3
+        diverse_up = concatenate_datasets([diverse] * diverse_repeat)
+        print(f"  Diverse: SciQ {len(sciq)} + ECQA {len(ecqa)} + CoS-E {len(cose)} + OBQA {len(obqa)} "
+              f"= {len(diverse)} x {diverse_repeat} = {len(diverse_up)}")
+        train_data = concatenate_datasets([wiki_train, math_up, diverse_up])
+    else:
+        train_data = concatenate_datasets([wiki_train, math_up])
+
     val_data = wiki_val
-    print(f"  Total train: {len(train_data)} "
-          f"(Wiki {len(wiki_train)} | Math {len(math_up)} | Diverse {len(diverse_up)})")
+    print(f"  Total train: {len(train_data)}")
 
     def collate_fn(batch):
         """Tokenize a batch of text strings into padded tensors."""
@@ -325,7 +386,7 @@ def train():
     grad_accum_steps = 4
 
     # ------------------------------------------------------------------
-    # Training config — preliminary fast run
+    # Training config
     # ------------------------------------------------------------------
     alpha_base = 0.1   # train with larger alpha so router learns stronger corrections
     alpha_scale = ALPHA_SCALE
@@ -333,22 +394,23 @@ def train():
     best_val_loss = float('inf')
     log_interval = 100
     val_interval = 500
-    max_steps = 10000  # Preliminary — fast iteration
 
-    # Cosine annealing: LR starts at 5e-4, smoothly decreases following a cosine curve
-    # to eta_min=1e-5 over max_steps (avoids sudden LR drops that destabilize training)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=max_steps, eta_min=1e-5
     )
+    save_best = f"{args.save_prefix}_best.pt"
+    save_final = f"{args.save_prefix}_final.pt"
+
     print("=" * 60)
-    print("Training ALA Router (preliminary)")
-    print(f"  Dataset:    wikitext-103 + GSM8K + MATH")
+    print(f"Training ALA Router — Stage {args.stage}")
+    print(f"  Save prefix: {args.save_prefix}")
     print(f"  Max steps:  {max_steps}")
+    print(f"  LR:         {lr}")
     print(f"  Batch size: 8 x {grad_accum_steps} grad_accum = {8 * grad_accum_steps} effective")
     print(f"  Alpha:      {alpha_base} + {alpha_scale} * p_mask")
+    print(f"  Gate:       {use_gate}")
     print(f"  range_r:    {RANGE_R}")
     print(f"  p_mask:     U[0.3, 1.0]")
-    print(f"  Compile:    max-autotune | Optimizer: fused AdamW | Precision: bf16")
     print("=" * 60)
 
     running_loss = 0.0
@@ -470,20 +532,21 @@ def train():
 
                     if val_loss < best_val_loss:
                         best_val_loss = val_loss
-                        # state_dict(): saves only learnable parameters as {name: tensor} dict
-                        # This is just the router (~30M params), not the 8B base model
-                        torch.save(router.state_dict(), "amip_router_best.pt")
-                        print(f"  >>> New best model saved!")
+                        # Save underlying module to avoid _orig_mod. prefix from torch.compile
+                        underlying = router._orig_mod if hasattr(router, '_orig_mod') else router
+                        torch.save(underlying.state_dict(), save_best)
+                        print(f"  >>> New best model saved to {save_best}!")
 
         if step_count >= max_steps:
             break
 
     # Final save (regardless of validation loss)
-    torch.save(router.state_dict(), "amip_router_final.pt")
+    underlying = router._orig_mod if hasattr(router, '_orig_mod') else router
+    torch.save(underlying.state_dict(), save_final)
     elapsed = time.time() - start_time
     print(f"\nTraining complete. {step_count} steps in {elapsed/60:.1f} minutes.")
     print(f"Best validation loss: {best_val_loss:.4f}")
-    print(f"Models saved: amip_router_best.pt, amip_router_final.pt")
+    print(f"Models saved: {save_best}, {save_final}")
 
 
 if __name__ == "__main__":

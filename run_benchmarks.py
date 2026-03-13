@@ -114,7 +114,7 @@ def extract_answer_arc(text):
 # Model Loading
 # ============================================================
 
-def load_model():
+def load_model(args):
     model_id = 'GSAI-ML/LLaDA-8B-Instruct'
     print("Loading tokenizer and base model...")
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
@@ -122,19 +122,19 @@ def load_model():
         model_id, trust_remote_code=True,
         torch_dtype=torch.bfloat16, device_map="auto"
     )
-    model = ALALLaDA(base_model).to(torch.bfloat16)
+    model = ALALLaDA(base_model, use_gate=args.use_gate).to(torch.bfloat16)
     device = next(base_model.parameters()).device
     model.router.to(device)
 
-    weights_path = "amip_router_best.pt"
+    weights_path = args.weights
     if os.path.exists(weights_path):
-        model.router.load_state_dict(
-            torch.load(weights_path, map_location=device),
-            strict=False
-        )
-        print(f"Router loaded from {weights_path}")
+        state_dict = torch.load(weights_path, map_location=device)
+        # Strip _orig_mod. prefix if saved from torch.compile
+        cleaned = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+        model.router.load_state_dict(cleaned, strict=False)
+        print(f"Router loaded from {weights_path} (use_gate={args.use_gate})")
     else:
-        print("WARNING: Using random router weights.")
+        print(f"WARNING: {weights_path} not found, using random router weights.")
 
     model.eval()
     print(f"Inference alpha: {INFERENCE_ALPHA}")
@@ -377,51 +377,6 @@ def eval_gpqa(model, tokenizer, args):
                           gen_length=128, steps=128, progress_every=50)
 
 
-# ============================================================
-# GPQA Diamond CoT (n=198, longer generation with reasoning)
-# ============================================================
-
-def _extract_gpqa_answer(text):
-    """Shared GPQA answer extraction — boxed, then (X), then bare letter."""
-    boxed = extract_boxed(text)
-    if boxed:
-        match = re.search(r'([A-D])', boxed.upper())
-        if match:
-            return match.group(1)
-    match = re.search(r'\(([A-D])\)', text.upper())
-    if match:
-        return match.group(1)
-    match = re.search(r'([A-D])', text.upper())
-    return match.group(1) if match else ""
-
-
-@torch.no_grad()
-def eval_gpqa_cot(model, tokenizer, args):
-    print(f"\n{'='*60}", flush=True)
-    print(f"GPQA Diamond CoT (α={INFERENCE_ALPHA})", flush=True)
-    print(f"{'='*60}", flush=True)
-
-    dataset = load_dataset("hendrydong/gpqa_diamond_mc", split="test")
-    items = []
-    for idx in range(len(dataset)):
-        sample = dataset[idx]
-        prompt = (f"Answer this graduate-level question. "
-                  f"Think step by step, then put your final answer in \\boxed{{}}.\n\n"
-                  f"{sample['problem']}\n\n"
-                  f"Let's think step by step.")
-        ids = tokenizer(prompt, return_tensors="pt", truncation=True,
-                        max_length=512)["input_ids"].to(model.device)
-        gold = extract_boxed(sample["solution"]).upper()
-        if not gold:
-            continue
-        items.append((idx, ids, gold, {}))
-
-    print(f"  Valid samples: {len(items)}", flush=True)
-    return _run_eval_loop(items, model, tokenizer, args, "gpqa_cot",
-                          extract_fn=_extract_gpqa_answer,
-                          match_fn=lambda p, g: p == g,
-                          gen_length=256, steps=256, progress_every=50)
-
 
 # ============================================================
 # BBH — hardest subtasks (n~200 total)
@@ -504,102 +459,6 @@ def eval_bbh(model, tokenizer, args):
     return result
 
 
-# ============================================================
-# ARC-Challenge CoT (n=200)
-# ============================================================
-
-@torch.no_grad()
-def eval_arc_cot(model, tokenizer, args, n=200):
-    print(f"\n{'='*60}", flush=True)
-    print(f"ARC-Challenge CoT (n={n}, α={INFERENCE_ALPHA})", flush=True)
-    print(f"{'='*60}", flush=True)
-
-    dataset = load_dataset("allenai/ai2_arc", "ARC-Challenge", split="test")
-    items = []
-    for idx in range(min(n, len(dataset))):
-        sample = dataset[idx]
-        choices = sample["choices"]
-        choice_lines = [f"{label}) {text}"
-                        for label, text in zip(choices["label"], choices["text"])]
-        prompt = (f"Question: {sample['question']}\n"
-                  f"{chr(10).join(choice_lines)}\n\n"
-                  f"Let's think step by step.")
-        ids = tokenizer(prompt, return_tensors="pt", truncation=True,
-                        max_length=512)["input_ids"].to(model.device)
-        items.append((idx, ids, sample["answerKey"].upper(), {}))
-
-    print(f"  Valid samples: {len(items)}", flush=True)
-    return _run_eval_loop(items, model, tokenizer, args, "arc_cot",
-                          extract_fn=extract_answer_arc,
-                          match_fn=lambda p, g: p == g,
-                          gen_length=256, steps=256, progress_every=50)
-
-
-# ============================================================
-# BBH CoT — hardest subtasks (n~200 total)
-# ============================================================
-
-@torch.no_grad()
-def eval_bbh_cot(model, tokenizer, args):
-    print(f"\n{'='*60}", flush=True)
-    print(f"BBH Hard Subtasks CoT (α={INFERENCE_ALPHA})", flush=True)
-    print(f"{'='*60}", flush=True)
-
-    items = []
-    subtask_ranges = {}
-    for subtask in BBH_HARD_SUBTASKS:
-        try:
-            ds = load_dataset("lukaemon/bbh", subtask, split="test")
-        except Exception as e:
-            print(f"  WARNING: Could not load {subtask}: {e}")
-            continue
-
-        shots = []
-        for i in range(min(3, len(ds))):
-            shots.append(f"Q: {ds[i]['input']}\nA: Let's think step by step. {ds[i]['target']}")
-        shot_text = "\n\n".join(shots) + "\n\n" if shots else ""
-
-        start_idx = 3
-        per_subtask = 33
-        subtask_start = len(items)
-
-        for j in range(start_idx, min(start_idx + per_subtask, len(ds))):
-            global_idx = len(items)
-            prompt = f"{shot_text}Q: {ds[j]['input']}\nA: Let's think step by step."
-            ids = tokenizer(prompt, return_tensors="pt", truncation=True,
-                            max_length=512)["input_ids"].to(model.device)
-            gold = ds[j]["target"].strip()
-            items.append((global_idx, ids, gold, {"subtask": subtask}))
-
-        subtask_ranges[subtask] = (subtask_start, len(items))
-        print(f"  {subtask}: {len(items) - subtask_start} samples (3-shot CoT)")
-
-    print(f"  Total samples: {len(items)}", flush=True)
-
-    def match_bbh(pred, gold):
-        return pred.strip().lower() == gold.strip().lower()
-
-    result = _run_eval_loop(items, model, tokenizer, args, "bbh_cot",
-                            extract_fn=lambda text: text.strip().split("\n")[-1].strip(),
-                            match_fn=match_bbh,
-                            gen_length=256, steps=256, progress_every=30)
-
-    per_sample = result.get("per_sample", {})
-    print(f"\n  BBH CoT by Subtask:")
-    print(f"  {'Subtask':<45} | {'N':>4} | {'Base':>8} | {'Router':>8} | {'Delta':>7}")
-    print(f"  {'-'*80}")
-    for subtask, (s, e) in subtask_ranges.items():
-        indices = [str(i) for i in range(s, e)]
-        n_sub, b_c, r_c = 0, 0, 0
-        for si in indices:
-            if si in per_sample and "correct_baseline" in per_sample[si]:
-                n_sub += 1
-                b_c += int(per_sample[si].get("correct_baseline", False))
-                r_c += int(per_sample[si].get("correct_router", False))
-        if n_sub > 0:
-            print(f"  {subtask:<45} | {n_sub:>4} | {b_c/n_sub:>7.0%} | {r_c/n_sub:>7.0%} | {(r_c-b_c)/n_sub:>+6.0%}")
-
-    return result
 
 
 # ============================================================
@@ -647,30 +506,6 @@ def eval_sciq(model, tokenizer, args, n=200):
                           gen_length=32, steps=32, progress_every=50)
 
 
-@torch.no_grad()
-def eval_sciq_cot(model, tokenizer, args, n=200):
-    print(f"\n{'='*60}", flush=True)
-    print(f"SciQ CoT (n={n}, α={INFERENCE_ALPHA})", flush=True)
-    print(f"{'='*60}", flush=True)
-
-    dataset = load_dataset("allenai/sciq", split="test")
-    items = []
-    for idx in range(min(n, len(dataset))):
-        sample = dataset[idx]
-        choices_str, gold = _sciq_shuffle_choices(sample, seed=idx)
-        prompt = (f"Question: {sample['question']}\n"
-                  f"{choices_str}\n\n"
-                  f"Let's think step by step.")
-        ids = tokenizer(prompt, return_tensors="pt", truncation=True,
-                        max_length=512)["input_ids"].to(model.device)
-        items.append((idx, ids, gold, {}))
-
-    print(f"  Valid samples: {len(items)}", flush=True)
-    return _run_eval_loop(items, model, tokenizer, args, "sciq_cot",
-                          extract_fn=extract_answer_arc,
-                          match_fn=lambda p, g: p == g,
-                          gen_length=256, steps=256, progress_every=50)
-
 
 # ============================================================
 # OpenBookQA (n=200, trained domain)
@@ -703,32 +538,6 @@ def eval_obqa(model, tokenizer, args, n=200):
                           gen_length=32, steps=32, progress_every=50)
 
 
-@torch.no_grad()
-def eval_obqa_cot(model, tokenizer, args, n=200):
-    print(f"\n{'='*60}", flush=True)
-    print(f"OpenBookQA CoT (n={n}, α={INFERENCE_ALPHA})", flush=True)
-    print(f"{'='*60}", flush=True)
-
-    dataset = load_dataset("allenai/openbookqa", "additional", split="test")
-    items = []
-    for idx in range(min(n, len(dataset))):
-        sample = dataset[idx]
-        choices = sample["choices"]
-        choice_lines = [f"{label}) {text}"
-                        for label, text in zip(choices["label"], choices["text"])]
-        prompt = (f"Question: {sample['question_stem']}\n"
-                  f"{chr(10).join(choice_lines)}\n\n"
-                  f"Let's think step by step.")
-        ids = tokenizer(prompt, return_tensors="pt", truncation=True,
-                        max_length=512)["input_ids"].to(model.device)
-        items.append((idx, ids, sample["answerKey"].upper(), {}))
-
-    print(f"  Valid samples: {len(items)}", flush=True)
-    return _run_eval_loop(items, model, tokenizer, args, "obqa_cot",
-                          extract_fn=extract_answer_arc,
-                          match_fn=lambda p, g: p == g,
-                          gen_length=256, steps=256, progress_every=50)
-
 
 # ============================================================
 # Main
@@ -737,10 +546,13 @@ def eval_obqa_cot(model, tokenizer, args, n=200):
 def parse_args():
     parser = argparse.ArgumentParser(description="Scaled benchmark evaluation for ALA-LLaDA")
     parser.add_argument("--benchmarks", nargs="+",
-                        choices=["gsm8k", "math", "arc", "arc_cot", "gpqa", "gpqa_cot",
-                                 "bbh", "bbh_cot", "sciq", "sciq_cot", "obqa", "obqa_cot"],
+                        choices=["gsm8k", "math", "arc", "gpqa", "bbh", "sciq", "obqa"],
                         default=["gsm8k", "math", "arc", "gpqa", "bbh"],
                         help="Which benchmarks to run")
+    parser.add_argument("--weights", type=str, default="amip_router_best.pt",
+                        help="Path to router checkpoint")
+    parser.add_argument("--use-gate", action="store_true",
+                        help="Use confidence-gated router")
     parser.add_argument("--checkpoint-dir", default="checkpoints",
                         help="Directory for checkpoint files")
     parser.add_argument("--resume", action="store_true",
@@ -762,17 +574,14 @@ if __name__ == "__main__":
     args = parse_args()
     os.makedirs(args.checkpoint_dir, exist_ok=True)
 
-    model, tokenizer = load_model()
+    model, tokenizer = load_model(args)
 
     results = {}
     total_t0 = time.time()
 
     # Run order: fast first (ARC, GPQA, BBH), then longer (MATH, GSM8K)
     run_order = []
-    # Run order: fast direct first, then CoT (longer gen), then long benchmarks
-    for b in ["arc", "sciq", "obqa", "gpqa", "bbh",
-              "arc_cot", "sciq_cot", "obqa_cot", "gpqa_cot", "bbh_cot",
-              "math", "gsm8k"]:
+    for b in ["arc", "sciq", "obqa", "gpqa", "bbh", "math", "gsm8k"]:
         if b in args.benchmarks:
             run_order.append(b)
 
@@ -780,15 +589,10 @@ if __name__ == "__main__":
         "gsm8k": lambda: eval_gsm8k(model, tokenizer, args),
         "math": lambda: eval_math(model, tokenizer, args),
         "arc": lambda: eval_arc(model, tokenizer, args),
-        "arc_cot": lambda: eval_arc_cot(model, tokenizer, args),
         "gpqa": lambda: eval_gpqa(model, tokenizer, args),
-        "gpqa_cot": lambda: eval_gpqa_cot(model, tokenizer, args),
         "bbh": lambda: eval_bbh(model, tokenizer, args),
-        "bbh_cot": lambda: eval_bbh_cot(model, tokenizer, args),
         "sciq": lambda: eval_sciq(model, tokenizer, args),
-        "sciq_cot": lambda: eval_sciq_cot(model, tokenizer, args),
         "obqa": lambda: eval_obqa(model, tokenizer, args),
-        "obqa_cot": lambda: eval_obqa_cot(model, tokenizer, args),
     }
 
     for benchmark in run_order:

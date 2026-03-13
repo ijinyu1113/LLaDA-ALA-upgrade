@@ -64,13 +64,18 @@ class AMIPRouterTrain(nn.Module):
     Returns:
         [N, d_model] relevance-gated delta corrections
     """
-    def __init__(self, d_model=4096, K=8):
+    def __init__(self, d_model=4096, K=8, use_gate=False):
         super().__init__()
         self.d_proj = d_model // 8  # projection dim for Q/K attention (4096 -> 512)
         self.routing_net = nn.Linear(d_model, K)  # maps hidden state -> K expert weights
         self.experts = _make_experts(d_model, K)
         self.q_proj = nn.Linear(d_model, self.d_proj)  # query projection (from mask token)
         self.k_proj = nn.Linear(d_model, self.d_proj)  # key projection (from anchor token)
+        self.use_gate = use_gate
+        if use_gate:
+            self.conf_gate = nn.Linear(d_model, 1)
+            nn.init.zeros_(self.conf_gate.weight)
+            nn.init.constant_(self.conf_gate.bias, -2.0)  # sigmoid(-2) ~ 0.12, starts mostly off
 
     def forward(self, h_anchor, h_mask):
         # --- Mixture of Experts (MoE) ---
@@ -89,7 +94,10 @@ class AMIPRouterTrain(nn.Module):
             (q * k).sum(dim=-1, keepdim=True) / (self.d_proj ** 0.5)
         )                                                            # [N, 1]
 
-        return delta * relevance
+        result = delta * relevance
+        if self.use_gate:
+            result = result * torch.sigmoid(self.conf_gate(h_mask))  # [N, 1] per-position suppression
+        return result
 
 
 # ============================================================
@@ -120,13 +128,18 @@ class AMIPRouterInference(nn.Module):
     Returns:
         [B, L, d] correction vectors (zero vectors at non-masked positions)
     """
-    def __init__(self, d_model=4096, K=8):
+    def __init__(self, d_model=4096, K=8, use_gate=False):
         super().__init__()
         self.d_proj = d_model // 8                   # 4096 -> 512 projection for Q/K attention
         self.routing_net = nn.Linear(d_model, K)     # maps h_mask -> K expert weights
         self.experts = _make_experts(d_model, K)     # K experts, each: [2d] -> [d/2] -> [d]
         self.q_proj = nn.Linear(d_model, self.d_proj)  # query proj (from mask token)
         self.k_proj = nn.Linear(d_model, self.d_proj)  # key proj (from anchor token)
+        self.use_gate = use_gate
+        if use_gate:
+            self.conf_gate = nn.Linear(d_model, 1)
+            nn.init.zeros_(self.conf_gate.weight)
+            nn.init.constant_(self.conf_gate.bias, -2.0)  # sigmoid(-2) ~ 0.12, starts mostly off
 
     def forward(self, h_L, mask_indices, unmasked_indices, range_r=RANGE_R):
         # Output: one correction vector per position. Non-masked positions stay as zero vectors.
@@ -203,6 +216,11 @@ class AMIPRouterInference(nn.Module):
                 weighted_deltas                       # [P, d] — values to scatter
             )  # delta_h[b] is [L, d] — now has correction vectors at masked positions
 
+            # ---- Optional: Confidence gate — suppress corrections where unnecessary ----
+            if self.use_gate:
+                gate_vals = torch.sigmoid(self.conf_gate(h_L[b, m_idx]))  # [M, 1]
+                delta_h[b, m_idx] *= gate_vals
+
         return delta_h  # [B, L, d] — correction vectors, added to h_L as: h_blended = h_L + α * delta_h
 
 
@@ -216,10 +234,10 @@ class ALALLaDA(nn.Module):
     prompt_length excludes prompt tokens from p_mask computation
     (they are never masked, so including them deflates p_mask).
     """
-    def __init__(self, base_model, router=None):
+    def __init__(self, base_model, router=None, use_gate=False):
         super().__init__()
         self.base_model = base_model
-        self.router = router if router is not None else AMIPRouterInference()
+        self.router = router if router is not None else AMIPRouterInference(use_gate=use_gate)
 
     @property
     def device(self):
