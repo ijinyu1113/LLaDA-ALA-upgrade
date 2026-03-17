@@ -160,6 +160,93 @@ def eval_by_mask_ratio(model, tokenizer, num_samples=50):
 
 
 # ============================================================
+# EVAL 2b: Single-Step Mask Accuracy by Domain
+# ============================================================
+@torch.no_grad()
+def eval_mask_accuracy_by_domain(model, tokenizer, num_samples=50, p_mask=0.5):
+    """
+    Single-step mask prediction accuracy on Wiki, GSM8K, and MATH sequences.
+    No generation — just one forward pass per example. Runs in minutes.
+    Tests whether the router improves per-step predictions on math-domain data.
+    """
+    print(f"\n{'='*60}")
+    print(f"EVAL 2b: Single-Step Mask Accuracy by Domain (p_mask={p_mask})")
+    print(f"{'='*60}")
+
+    # --- Load domain data ---
+    domains = {}
+
+    # Wiki
+    wiki = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
+    wiki_texts = [t for t in wiki["text"][:500] if len(t) > 50][:num_samples]
+    domains["wiki"] = wiki_texts
+
+    # GSM8K (format as training sees it)
+    gsm8k = load_dataset("openai/gsm8k", "main", split="test")
+    gsm8k_texts = [
+        f"Question: {s['question']}\nAnswer: {s['answer']}"
+        for s in gsm8k.select(range(min(num_samples, len(gsm8k))))
+    ]
+    domains["gsm8k"] = gsm8k_texts
+
+    # MATH
+    from datasets import concatenate_datasets as cc
+    math_subjects = ["algebra", "counting_and_probability", "geometry",
+                     "intermediate_algebra", "number_theory", "prealgebra", "precalculus"]
+    math_parts = [load_dataset("EleutherAI/hendrycks_math", subj, split="test") for subj in math_subjects]
+    math_ds = cc(math_parts).shuffle(seed=42)
+    math_texts = [
+        f"Problem: {s['problem']}\nSolution: {s['solution']}"
+        for s in math_ds.select(range(min(num_samples, len(math_ds))))
+    ]
+    domains["math"] = math_texts
+
+    all_results = {}
+    print(f"\n  {'Domain':<10} | {'N_tokens':<10} | {'Base Acc':<10} | {'Router Acc':<12} | {'Delta':<10}")
+    print(f"  {'-'*58}")
+
+    for domain_name, texts in domains.items():
+        correct_base, correct_router, total = 0, 0, 0
+
+        for text in texts:
+            enc = tokenizer(text, return_tensors="pt", truncation=True, max_length=256)
+            ids = enc["input_ids"].to(model.device)
+            attn_mask = enc["attention_mask"].to(model.device)
+            original = ids.clone()
+
+            mask_prob = torch.full(ids.shape, p_mask, device=ids.device)
+            mask_prob = mask_prob * attn_mask
+            mask_prob[:, 0] = 0
+            mask_indices = torch.bernoulli(mask_prob).bool()
+
+            masked_ids = ids.clone()
+            masked_ids[mask_indices] = MASK_TOKEN_ID
+
+            if not mask_indices.any():
+                continue
+
+            b_logits = model.base_logits(masked_ids)
+            r_logits = model(masked_ids).logits
+
+            targets = original[mask_indices]
+            correct_base += (b_logits.argmax(dim=-1)[mask_indices] == targets).sum().item()
+            correct_router += (r_logits.argmax(dim=-1)[mask_indices] == targets).sum().item()
+            total += targets.numel()
+
+        base_acc = correct_base / total if total else 0
+        router_acc = correct_router / total if total else 0
+        delta = router_acc - base_acc
+
+        all_results[domain_name] = {
+            "base_acc": base_acc, "router_acc": router_acc,
+            "delta": delta, "n_tokens": total
+        }
+        print(f"  {domain_name:<10} | {total:<10} | {base_acc:<10.4f} | {router_acc:<12.4f} | {delta:<+10.4f}")
+
+    return all_results
+
+
+# ============================================================
 # EVAL 3: Logical Reasoning (generative, across temperatures)
 # ============================================================
 LOGIC_TEST_CASES = [
@@ -758,6 +845,14 @@ def plot_sweep_summary(logic_results, diversity_results,
 # MAIN
 # ============================================================
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--eval", type=str, default=None,
+                        help="Run a single eval: 1, 2, 2b, 3, 4, 5, 6, 7, 8")
+    parser.add_argument("--weights", type=str, default="amip_router_best.pt",
+                        help="Path to router checkpoint")
+    cli_args = parser.parse_args()
+
     # --- Load Model ---
     model_id = 'GSAI-ML/LLaDA-8B-Instruct'
     print("Loading tokenizer and base model...")
@@ -769,18 +864,14 @@ if __name__ == "__main__":
         device_map="auto"
     )
 
-    # Wrap base model + inference router into ALALLaDA (uses AMIPRouterInference internally)
     model = ALALLaDA(base_model).to(torch.bfloat16)
-    device = next(base_model.parameters()).device  # get device from base model (could be multi-GPU)
+    device = next(base_model.parameters()).device
     model.router.to(device)
 
-    # Load trained router weights (saved by train_router.py)
-    weights_path = "amip_router_best.pt"
+    weights_path = cli_args.weights
     if os.path.exists(weights_path):
-        # load_state_dict: loads {param_name: tensor} dict into the router's parameters
-        # map_location ensures weights are loaded to the correct device
         model.router.load_state_dict(
-            torch.load(weights_path, map_location=device)
+            torch.load(weights_path, map_location=device), strict=False
         )
         print(f"Router loaded from {weights_path}")
     else:
@@ -789,178 +880,189 @@ if __name__ == "__main__":
     model.eval()
 
     print(f"\nAlpha schedule: alpha = {ALPHA_BASE} + {ALPHA_SCALE} * p_mask")
-    print(f"  p=0.15 -> alpha={ALPHA_BASE + ALPHA_SCALE*0.15:.4f}")
-    print(f"  p=0.50 -> alpha={ALPHA_BASE + ALPHA_SCALE*0.50:.4f}")
-    print(f"  p=0.95 -> alpha={ALPHA_BASE + ALPHA_SCALE*0.95:.4f}")
 
     # ===========================================================
-    # RUN ALL EVALS
+    # RUN EVALS (all or single)
     # ===========================================================
+    run_eval = cli_args.eval
     all_results = {}
     sweep_temps = [0.0, 0.15, 0.3]
+    mask_ratio_results = None
+    logic_results = None
+    diversity_results = None
 
-    # EVAL 1: Single-step mask accuracy
-    all_results["mask_accuracy"] = eval_mask_accuracy(
-        model, tokenizer, num_samples=20
-    )
+    if run_eval in (None, "1"):
+        all_results["mask_accuracy"] = eval_mask_accuracy(
+            model, tokenizer, num_samples=20
+        )
 
-    # EVAL 2: Mask accuracy by ratio sweep
-    mask_ratio_results = eval_by_mask_ratio(
-        model, tokenizer, num_samples=50
-    )
-    all_results["mask_accuracy_by_ratio"] = mask_ratio_results
+    if run_eval in (None, "2"):
+        mask_ratio_results = eval_by_mask_ratio(
+            model, tokenizer, num_samples=50
+        )
+        all_results["mask_accuracy_by_ratio"] = mask_ratio_results
 
-    # EVAL 3: Logical reasoning across temperatures
-    logic_results = eval_logical_reasoning(
-        model, tokenizer, temps=sweep_temps
-    )
-    all_results["logical_reasoning"] = logic_results
+    if run_eval in (None, "2b"):
+        domain_results = eval_mask_accuracy_by_domain(
+            model, tokenizer, num_samples=50, p_mask=0.5
+        )
+        all_results["mask_accuracy_by_domain"] = domain_results
 
-    # EVAL 4: Diversity across temperatures
-    diversity_results = eval_diversity(
-        model, tokenizer, num_samples=5, temps=sweep_temps
-    )
-    all_results["diversity"] = [
-        {
-            "temp": d["temp"],
-            "Baseline": {
-                "unique_ratio": d["Baseline"]["unique_ratio"],
-                "jaccard": d["Baseline"]["jaccard"]
-            },
-            "Router": {
-                "unique_ratio": d["Router"]["unique_ratio"],
-                "jaccard": d["Router"]["jaccard"]
+    if run_eval in (None, "3"):
+        logic_results = eval_logical_reasoning(
+            model, tokenizer, temps=sweep_temps
+        )
+        all_results["logical_reasoning"] = logic_results
+
+    if run_eval in (None, "4"):
+        diversity_results = eval_diversity(
+            model, tokenizer, num_samples=5, temps=sweep_temps
+        )
+        all_results["diversity"] = [
+            {
+                "temp": d["temp"],
+                "Baseline": {
+                    "unique_ratio": d["Baseline"]["unique_ratio"],
+                    "jaccard": d["Baseline"]["jaccard"]
+                },
+                "Router": {
+                    "unique_ratio": d["Router"]["unique_ratio"],
+                    "jaccard": d["Router"]["jaccard"]
+                }
             }
+            for d in diversity_results
+        ]
+
+    if run_eval in (None, "5"):
+        entropy_res = eval_entropy_over_steps(model, tokenizer, num_samples=3)
+        all_results["entropy"] = {
+            "mean_base": float(np.mean(entropy_res["avg_base"])),
+            "mean_router": float(np.mean(entropy_res["avg_router"]))
         }
-        for d in diversity_results
-    ]
+        plot_entropy_curve(entropy_res)
 
-    # EVAL 5: Entropy across denoising steps
-    entropy_res = eval_entropy_over_steps(model, tokenizer, num_samples=3)
-    all_results["entropy"] = {
-        "mean_base": float(np.mean(entropy_res["avg_base"])),
-        "mean_router": float(np.mean(entropy_res["avg_router"]))
-    }
-    plot_entropy_curve(entropy_res)
-
-    # EVAL 6: Flatness
-    flatness_res = eval_flatness(model, tokenizer)
-    all_results["flatness"] = {
-        mode: {
-            "entropy": r["entropy"],
-            "normalized_entropy": r["normalized_entropy"]
+    if run_eval in (None, "6"):
+        flatness_res = eval_flatness(model, tokenizer)
+        all_results["flatness"] = {
+            mode: {
+                "entropy": r["entropy"],
+                "normalized_entropy": r["normalized_entropy"]
+            }
+            for mode, r in flatness_res.items()
         }
-        for mode, r in flatness_res.items()
-    }
-    plot_flatness(flatness_res)
+        plot_flatness(flatness_res)
 
-    # EVAL 7: GSM8K End-to-End Benchmark
-    gsm8k_res = eval_gsm8k(model, tokenizer, num_samples=100)
-    all_results["gsm8k"] = {
-        mode: {
-            "accuracy": r["accuracy"],
-            "correct": r["correct"],
-            "total": r["total"]
+    if run_eval in (None, "7"):
+        gsm8k_res = eval_gsm8k(model, tokenizer, num_samples=100)
+        all_results["gsm8k"] = {
+            mode: {
+                "accuracy": r["accuracy"],
+                "correct": r["correct"],
+                "total": r["total"]
+            }
+            for mode, r in gsm8k_res.items()
         }
-        for mode, r in gsm8k_res.items()
-    }
 
-    # EVAL 8: MATH End-to-End Benchmark
-    math_res = eval_math(model, tokenizer, num_samples=50)
-    all_results["math"] = {
-        mode: {
-            "accuracy": r["accuracy"],
-            "correct": r["correct"],
-            "total": r["total"]
+    if run_eval in (None, "8"):
+        math_res = eval_math(model, tokenizer, num_samples=50)
+        all_results["math"] = {
+            mode: {
+                "accuracy": r["accuracy"],
+                "correct": r["correct"],
+                "total": r["total"]
+            }
+            for mode, r in math_res.items()
         }
-        for mode, r in math_res.items()
-    }
 
-    # --- Plots ---
-    plot_sweep_summary(logic_results, diversity_results)
+    if run_eval is None and logic_results and diversity_results:
+        plot_sweep_summary(logic_results, diversity_results)
 
     # ===========================================================
-    # FINAL SUMMARY TABLE
+    # SUMMARY
     # ===========================================================
     print(f"\n{'='*80}")
-    print(f"COMPLETE EVALUATION SUMMARY")
+    print(f"EVALUATION SUMMARY")
     print(f"  Alpha schedule: {ALPHA_BASE} + {ALPHA_SCALE} * p_mask")
     print(f"{'='*80}")
 
-    # 1. Mask accuracy
-    ma = all_results["mask_accuracy"]
-    print(f"\n  1. Mask Prediction Accuracy (single-step, p=0.15)")
-    print(f"     Baseline: {ma['base_acc']:.4f}  |  "
-          f"Router: {ma['router_acc']:.4f}  |  "
-          f"Δ: {ma['router_acc']-ma['base_acc']:+.4f}")
+    if "mask_accuracy" in all_results:
+        ma = all_results["mask_accuracy"]
+        print(f"\n  1. Mask Prediction Accuracy (single-step, p=0.15)")
+        print(f"     Baseline: {ma['base_acc']:.4f}  |  "
+              f"Router: {ma['router_acc']:.4f}  |  "
+              f"Δ: {ma['router_acc']-ma['base_acc']:+.4f}")
 
-    # 2. Mask accuracy by ratio
-    print(f"\n  2. Mask Accuracy by Ratio")
-    print(f"     {'p_mask':<8} | {'α':<6} | {'Base Acc':<10} | "
-          f"{'Router Acc':<12} | {'Δ Acc':<10} | {'Δ Conf':<10}")
-    print(f"     {'-'*62}")
-    for r in mask_ratio_results:
-        d_acc = r['router_acc'] - r['base_acc']
-        d_conf = r['router_conf'] - r['base_conf']
-        print(f"     {r['p_mask']:<8.2f} | {r['alpha']:<6.3f} | "
-              f"{r['base_acc']:<10.4f} | {r['router_acc']:<12.4f} | "
-              f"{d_acc:<+10.4f} | {d_conf:<+10.4f}")
+    if "mask_accuracy_by_domain" in all_results:
+        print(f"\n  2b. Single-Step Mask Accuracy by Domain (p=0.5)")
+        print(f"     {'Domain':<10} | {'Base Acc':<10} | {'Router Acc':<12} | {'Delta':<10}")
+        print(f"     {'-'*46}")
+        for domain, r in all_results["mask_accuracy_by_domain"].items():
+            print(f"     {domain:<10} | {r['base_acc']:<10.4f} | {r['router_acc']:<12.4f} | {r['delta']:<+10.4f}")
 
-    # 3. Logical reasoning across temps
-    print(f"\n  3. Logical Reasoning Accuracy")
-    print(f"     {'Temp':<8} | {'Baseline':<10} | {'Router':<10} | {'Δ':<10}")
-    print(f"     {'-'*42}")
-    for r in logic_results:
-        delta = r['router_acc'] - r['base_acc']
-        print(f"     {r['temp']:<8} | {r['base_acc']:<10.4f} | "
-              f"{r['router_acc']:<10.4f} | {delta:<+10.4f}")
+    if "mask_accuracy_by_ratio" in all_results and mask_ratio_results:
+        print(f"\n  2. Mask Accuracy by Ratio")
+        print(f"     {'p_mask':<8} | {'α':<6} | {'Base Acc':<10} | "
+              f"{'Router Acc':<12} | {'Δ Acc':<10} | {'Δ Conf':<10}")
+        print(f"     {'-'*62}")
+        for r in mask_ratio_results:
+            d_acc = r['router_acc'] - r['base_acc']
+            d_conf = r['router_conf'] - r['base_conf']
+            print(f"     {r['p_mask']:<8.2f} | {r['alpha']:<6.3f} | "
+                  f"{r['base_acc']:<10.4f} | {r['router_acc']:<12.4f} | "
+                  f"{d_acc:<+10.4f} | {d_conf:<+10.4f}")
 
-    # 4. Diversity across temps
-    print(f"\n  4. Diversity (Jaccard Similarity — lower is more diverse)")
-    print(f"     {'Temp':<8} | {'Base Jaccard':<14} | {'Router Jaccard':<16} "
-          f"| {'Base Unique':<14} | {'Router Unique':<14}")
-    print(f"     {'-'*70}")
-    for d in all_results["diversity"]:
-        print(f"     {d['temp']:<8} | "
-              f"{d['Baseline']['jaccard']:<14.4f} | "
-              f"{d['Router']['jaccard']:<16.4f} | "
-              f"{d['Baseline']['unique_ratio']:<14.4f} | "
-              f"{d['Router']['unique_ratio']:<14.4f}")
+    if "logical_reasoning" in all_results and logic_results:
+        print(f"\n  3. Logical Reasoning Accuracy")
+        print(f"     {'Temp':<8} | {'Baseline':<10} | {'Router':<10} | {'Δ':<10}")
+        print(f"     {'-'*42}")
+        for r in logic_results:
+            delta = r['router_acc'] - r['base_acc']
+            print(f"     {r['temp']:<8} | {r['base_acc']:<10.4f} | "
+                  f"{r['router_acc']:<10.4f} | {delta:<+10.4f}")
 
-    # 5. Entropy
-    ent = all_results["entropy"]
-    print(f"\n  5. Entropy Across Denoising Steps")
-    print(f"     Mean Base: {ent['mean_base']:.4f}  |  "
-          f"Mean Router: {ent['mean_router']:.4f}  |  "
-          f"Δ: {ent['mean_router']-ent['mean_base']:+.4f}")
+    if "diversity" in all_results:
+        print(f"\n  4. Diversity (Jaccard Similarity — lower is more diverse)")
+        print(f"     {'Temp':<8} | {'Base Jaccard':<14} | {'Router Jaccard':<16} "
+              f"| {'Base Unique':<14} | {'Router Unique':<14}")
+        print(f"     {'-'*70}")
+        for d in all_results["diversity"]:
+            print(f"     {d['temp']:<8} | "
+                  f"{d['Baseline']['jaccard']:<14.4f} | "
+                  f"{d['Router']['jaccard']:<16.4f} | "
+                  f"{d['Baseline']['unique_ratio']:<14.4f} | "
+                  f"{d['Router']['unique_ratio']:<14.4f}")
 
-    # 6. Flatness
-    fl = all_results["flatness"]
-    print(f"\n  6. Distribution Flatness (normalized entropy, 1.0 = uniform)")
-    print(f"     Baseline: {fl['Baseline']['normalized_entropy']:.4f}  |  "
-          f"Router: {fl['Router']['normalized_entropy']:.4f}")
+    if "entropy" in all_results:
+        ent = all_results["entropy"]
+        print(f"\n  5. Entropy Across Denoising Steps")
+        print(f"     Mean Base: {ent['mean_base']:.4f}  |  "
+              f"Mean Router: {ent['mean_router']:.4f}  |  "
+              f"Δ: {ent['mean_router']-ent['mean_base']:+.4f}")
 
-    # 7. GSM8K
-    gs = all_results["gsm8k"]
-    print(f"\n  7. GSM8K End-to-End Accuracy")
-    print(f"     Baseline: {gs['Baseline']['accuracy']:.4f} "
-          f"({gs['Baseline']['correct']}/{gs['Baseline']['total']})")
-    print(f"     Router:   {gs['Router']['accuracy']:.4f} "
-          f"({gs['Router']['correct']}/{gs['Router']['total']})")
+    if "flatness" in all_results:
+        fl = all_results["flatness"]
+        print(f"\n  6. Distribution Flatness (normalized entropy, 1.0 = uniform)")
+        print(f"     Baseline: {fl['Baseline']['normalized_entropy']:.4f}  |  "
+              f"Router: {fl['Router']['normalized_entropy']:.4f}")
 
-    # 8. MATH
-    mt = all_results["math"]
-    print(f"\n  8. MATH End-to-End Accuracy")
-    print(f"     Baseline: {mt['Baseline']['accuracy']:.4f} "
-          f"({mt['Baseline']['correct']}/{mt['Baseline']['total']})")
-    print(f"     Router:   {mt['Router']['accuracy']:.4f} "
-          f"({mt['Router']['correct']}/{mt['Router']['total']})")
+    if "gsm8k" in all_results:
+        gs = all_results["gsm8k"]
+        print(f"\n  7. GSM8K End-to-End Accuracy")
+        print(f"     Baseline: {gs['Baseline']['accuracy']:.4f} "
+              f"({gs['Baseline']['correct']}/{gs['Baseline']['total']})")
+        print(f"     Router:   {gs['Router']['accuracy']:.4f} "
+              f"({gs['Router']['correct']}/{gs['Router']['total']})")
+
+    if "math" in all_results:
+        mt = all_results["math"]
+        print(f"\n  8. MATH End-to-End Accuracy")
+        print(f"     Baseline: {mt['Baseline']['accuracy']:.4f} "
+              f"({mt['Baseline']['correct']}/{mt['Baseline']['total']})")
+        print(f"     Router:   {mt['Router']['accuracy']:.4f} "
+              f"({mt['Router']['correct']}/{mt['Router']['total']})")
 
     print(f"\n{'='*80}")
 
-    # Save all results
     with open("eval_results.json", "w") as f:
         json.dump(all_results, f, indent=2, default=str)
     print("Results saved to eval_results.json")
-    print("Plots saved: entropy_curve.png, flatness.png, sweep_summary.png")
-    print("Stories saved: generated_stories.txt")
