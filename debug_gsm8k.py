@@ -240,32 +240,95 @@ def eval_gsm8k(model, tokenizer, device, n=200):
 # Main
 # ============================================================
 
-if __name__ == "__main__":
-    model, tokenizer, device = load_model()
+@torch.no_grad()
+def eval_anchor_bias(model, tokenizer, device, n=50, biases=[0.0, 0.1, 0.3, 0.5]):
+    """Quick test: does anchor-proximity bias in decoding order help?
+    Runs MATH with different anchor_bias values. Small n for speed."""
+    print(f"\n{'='*60}")
+    print(f"ANCHOR BIAS TEST (n={n}, α={INFERENCE_ALPHA})")
+    print(f"  Biases: {biases}")
+    print(f"{'='*60}", flush=True)
 
+    subjects = ["algebra", "counting_and_probability", "geometry",
+                "intermediate_algebra", "number_theory", "prealgebra", "precalculus"]
+    parts = [load_dataset("EleutherAI/hendrycks_math", subj, split="test")
+             for subj in subjects]
+    ds = concatenate_datasets(parts)
+
+    items = []
+    for idx in range(min(n, len(ds))):
+        sample = ds[idx]
+        gold = extract_boxed(sample["solution"])
+        if not gold:
+            continue
+        prompt = (f"Solve this math problem. Put your final answer in \\boxed{{}}.\n\n"
+                  f"Problem: {sample['problem']}\n\nSolution:")
+        ids = tokenizer(prompt, return_tensors="pt", truncation=True,
+                        max_length=512)["input_ids"].to(device)
+        items.append((idx, ids, gold))
+
+    print(f"  Valid samples: {len(items)}", flush=True)
+
+    print(f"\n  {'Bias':<8} | {'Correct':<10} | {'Acc':<8}")
+    print(f"  {'-'*30}")
+
+    for bias in biases:
+        correct = 0
+        for i, (idx, ids, gold) in enumerate(items):
+            torch.manual_seed(42)
+            out = generate(model, ids, steps=256, gen_length=256,
+                           block_length=32, use_router=True, temp=0.0,
+                           alpha=INFERENCE_ALPHA, anchor_bias=bias)
+            response = tokenizer.decode(out[0, ids.shape[1]:],
+                                        skip_special_tokens=True).strip()
+            pred = extract_boxed(response)
+            hit = pred.strip().rstrip('.') == gold.strip().rstrip('.')
+            correct += int(hit)
+
+        acc = correct / len(items) if items else 0
+        print(f"  {bias:<8.2f} | {correct:>3}/{len(items):<6} | {acc:<8.1%}")
+
+    # Also run baseline (no router) for reference
+    correct = 0
+    for i, (idx, ids, gold) in enumerate(items):
+        torch.manual_seed(42)
+        out = generate(model, ids, steps=256, gen_length=256,
+                       block_length=32, use_router=False, temp=0.0)
+        response = tokenizer.decode(out[0, ids.shape[1]:],
+                                    skip_special_tokens=True).strip()
+        pred = extract_boxed(response)
+        hit = pred.strip().rstrip('.') == gold.strip().rstrip('.')
+        correct += int(hit)
+    acc = correct / len(items) if items else 0
+    print(f"  {'base':<8} | {correct:>3}/{len(items):<6} | {acc:<8.1%}")
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--anchor-bias", action="store_true",
+                        help="Run anchor-bias decoding test instead of normal eval")
+    parser.add_argument("-n", type=int, default=50,
+                        help="Number of samples for anchor-bias test")
+    args = parser.parse_args()
+
+    model, tokenizer, device = load_model()
     print(f"\nConfig: train α=0.1, inference α={INFERENCE_ALPHA}")
 
-    # MATH with difficulty breakdown
-    math_results = eval_math(model, tokenizer, device, n=200)
-    base_c = sum(1 for v in math_results["Baseline"].values() if v[1])
-    rout_c = sum(1 for v in math_results["Router"].values() if v[1])
-    n = len(math_results["Baseline"])
+    if args.anchor_bias:
+        eval_anchor_bias(model, tokenizer, device, n=args.n)
+    else:
+        math_results = eval_math(model, tokenizer, device, n=200)
+        base_c = sum(1 for v in math_results["Baseline"].values() if v[1])
+        rout_c = sum(1 for v in math_results["Router"].values() if v[1])
+        n = len(math_results["Baseline"])
 
-    # # GSM8K quick check (already have results, skipping for now)
-    # gsm8k_results = eval_gsm8k(model, tokenizer, device, n=200)
-    # gsm_base = sum(1 for v in gsm8k_results["Baseline"].values() if v[1])
-    # gsm_rout = sum(1 for v in gsm8k_results["Router"].values() if v[1])
-    # gsm_n = len(gsm8k_results["Baseline"])
+        print(f"\n{'='*60}")
+        print(f"SUMMARY (train α=0.1, inference α={INFERENCE_ALPHA})")
+        print(f"{'='*60}")
+        print(f"  MATH: {base_c}/{n} ({base_c/n:.1%}) baseline, {rout_c}/{n} ({rout_c/n:.1%}) router, delta {(rout_c-base_c)/n:+.1%}")
 
-    # Summary
-    print(f"\n{'='*60}")
-    print(f"SUMMARY (train α=0.1, inference α={INFERENCE_ALPHA})")
-    print(f"{'='*60}")
-    print(f"  MATH: {base_c}/{n} ({base_c/n:.1%}) baseline, {rout_c}/{n} ({rout_c/n:.1%}) router, delta {(rout_c-base_c)/n:+.1%}")
-
-    results = {
-        "MATH": {"Baseline": base_c/n, "Router": rout_c/n},
-    }
-    with open("gate_eval_results.json", "w") as f:
-        json.dump(results, f, indent=2)
-    print(f"\n  Results saved to gate_eval_results.json")
+        results = {"MATH": {"Baseline": base_c/n, "Router": rout_c/n}}
+        with open("gate_eval_results.json", "w") as f:
+            json.dump(results, f, indent=2)
+        print(f"\n  Results saved to gate_eval_results.json")

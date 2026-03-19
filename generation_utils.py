@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
-from models import MASK_TOKEN_ID
+from models import MASK_TOKEN_ID, RANGE_R
 
 # ============================================================
 # 2. GENERATION UTILS
@@ -23,13 +23,19 @@ def get_num_transfer_tokens(mask_index, steps):
 
 
 @torch.no_grad()
-def generate(model, prompt_ids, steps=128, gen_length=128, block_length=32, use_router=True, temp=0.0, alpha=None):
+def generate(model, prompt_ids, steps=128, gen_length=128, block_length=32,
+             use_router=True, temp=0.0, alpha=None, anchor_bias=0.0):
 
     """Full LLaDA generation with block-wise confidence-based unmasking.
 
     NOTE: Caller must seed (torch.manual_seed) before calling.
     The seed was removed from here so that eval_diversity can
     produce varied outputs with different seeds per sample.
+
+    anchor_bias: if > 0, add a bonus to commitment scores for masked positions
+    adjacent to already-committed (unmasked) tokens. This biases decoding to
+    expand outward from anchors rather than committing isolated tokens.
+    Set to 0.0 (default) to disable.
     """
     device, mask_id = model.device, MASK_TOKEN_ID
     x = torch.full((prompt_ids.shape[0], prompt_ids.shape[1] + gen_length), mask_id, dtype=torch.long).to(device)
@@ -47,11 +53,8 @@ def generate(model, prompt_ids, steps=128, gen_length=128, block_length=32, use_
 
         for i in range(steps_per_block):
             mask_index = (x == mask_id)
-            # Pass prompt_length so forward computes p_mask over
-            # generation region only (prompt tokens are never masked)
             logits = (model(x, prompt_length=prompt_ids.shape[1], alpha=alpha).logits
                       if use_router else model.base_logits(x))
-            #logits[:, :, 126081] = -torch.inf
 
             logits_noise = add_gumbel_noise(logits, temperature=temp)
             x0 = torch.argmax(logits_noise, dim=-1)
@@ -62,6 +65,19 @@ def generate(model, prompt_ids, steps=128, gen_length=128, block_length=32, use_
 
             x0 = torch.where(mask_index, x0, x)
             confidence = torch.where(mask_index, x0_p, -np.inf)
+
+            # Anchor-proximity bias: bonus for masked positions near committed tokens
+            # Uses RANGE_R (same radius the router uses to find anchors)
+            # so corrected positions get committed before corrections are wasted
+            if anchor_bias > 0:
+                unmasked = (~mask_index).float()  # [B, L], 1 where committed
+                kernel_size = 2 * RANGE_R + 1  # 21 for RANGE_R=10
+                kernel = torch.ones(1, 1, kernel_size, device=device)
+                neighbor_count = F.conv1d(
+                    unmasked.unsqueeze(1), kernel, padding=RANGE_R
+                ).squeeze(1)  # [B, L] — count of anchors within RANGE_R
+                proximity_bonus = torch.where(mask_index, neighbor_count * anchor_bias, 0.0)
+                confidence = confidence + proximity_bonus
 
             transfer_idx = torch.zeros_like(x, dtype=torch.bool)
             for j in range(confidence.shape[0]):
