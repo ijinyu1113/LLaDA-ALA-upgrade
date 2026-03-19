@@ -176,12 +176,10 @@ def _run_eval_loop(items, model, tokenizer, args, benchmark_name,
         for mode in ["Baseline", "Router"]:
             use_router = (mode == "Router")
             alpha = INFERENCE_ALPHA if use_router else None
-            bias = args.anchor_bias if use_router else 0.0
             torch.manual_seed(42)
             out = generate(model, ids, steps=steps, gen_length=gen_length,
                            block_length=block_length,
-                           use_router=use_router, temp=0.0, alpha=alpha,
-                           anchor_bias=bias)
+                           use_router=use_router, temp=0.0, alpha=alpha)
             response = tokenizer.decode(
                 out[0, ids.shape[1]:], skip_special_tokens=True
             ).strip()
@@ -563,8 +561,6 @@ def parse_args():
                         help="Resume from existing checkpoints")
     parser.add_argument("--save-every", type=int, default=50,
                         help="Checkpoint every N samples")
-    parser.add_argument("--anchor-bias", type=float, default=0.0,
-                        help="Anchor-proximity bias for decoding order (0.0 = off)")
     return parser.parse_args()
 
 
@@ -618,8 +614,7 @@ if __name__ == "__main__":
     # Final summary
     total_elapsed = time.time() - total_t0
     print(f"\n{'='*60}")
-    bias_str = f", anchor_bias={args.anchor_bias}" if args.anchor_bias > 0 else ""
-    print(f"BENCHMARK SUMMARY (α={INFERENCE_ALPHA}{bias_str}, total: {format_time(total_elapsed)})")
+    print(f"BENCHMARK SUMMARY (α={INFERENCE_ALPHA}, total: {format_time(total_elapsed)})")
     print(f"{'='*60}")
     print(f"  {'Benchmark':<15} | {'Baseline':>10} | {'Router':>10} | {'Delta':>10} | {'N':>6}")
     print(f"  {'-'*58}")

@@ -10,7 +10,7 @@
 #SBATCH --mem=80G
 #SBATCH --gpus-per-node=1
 #SBATCH --gpu-bind=verbose,closest
-#SBATCH --time=06:00:00
+#SBATCH --time=01:00:00
 
 export OMP_NUM_THREADS=16
 export OPENBLAS_NUM_THREADS=16
@@ -52,9 +52,6 @@ print(f'BF16 supported? {torch.cuda.is_bf16_supported()}')
 "
 echo "========================================="
 
-# Full eval on MATH + GSM8K with gated router
-time srun python3 /u/iyu1/nim_game_project/llada/run_benchmarks.py \
-    --benchmarks math gsm8k \
-    -n 99999 \
-    --weights amip_router_gated_best.pt --use-gate
+# Per-step mask accuracy by domain × mask ratio
+time srun python3 /u/iyu1/nim_game_project/llada/test_router.py --eval 2c
 

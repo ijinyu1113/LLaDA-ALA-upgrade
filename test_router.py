@@ -247,6 +247,90 @@ def eval_mask_accuracy_by_domain(model, tokenizer, num_samples=50, p_mask=0.5):
 
 
 # ============================================================
+# EVAL 2c: Mask Accuracy by Domain × Mask Ratio
+# ============================================================
+@torch.no_grad()
+def eval_mask_ratio_by_domain(model, tokenizer, num_samples=50):
+    """
+    Sweep mask ratios [0.15, 0.50, 0.85, 0.95] on Wiki, GSM8K, MATH.
+    Tests whether ALA helps more at high mask ratios (early denoising)
+    where the base model is weakest.
+    """
+    print(f"\n{'='*60}")
+    print(f"EVAL 2c: Mask Accuracy — Domain × Mask Ratio (n={num_samples})")
+    print(f"{'='*60}")
+
+    # --- Load domain data ---
+    wiki = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
+    wiki_texts = [t for t in wiki["text"][:500] if len(t) > 50][:num_samples]
+
+    gsm8k = load_dataset("openai/gsm8k", "main", split="test")
+    gsm8k_texts = [
+        f"Question: {s['question']}\nAnswer: {s['answer']}"
+        for s in gsm8k.select(range(min(num_samples, len(gsm8k))))
+    ]
+
+    from datasets import concatenate_datasets as cc
+    math_subjects = ["algebra", "counting_and_probability", "geometry",
+                     "intermediate_algebra", "number_theory", "prealgebra", "precalculus"]
+    math_parts = [load_dataset("EleutherAI/hendrycks_math", subj, split="test") for subj in math_subjects]
+    math_ds = cc(math_parts).shuffle(seed=42)
+    math_texts = [
+        f"Problem: {s['problem']}\nSolution: {s['solution']}"
+        for s in math_ds.select(range(min(num_samples, len(math_ds))))
+    ]
+
+    domains = {"wiki": wiki_texts, "gsm8k": gsm8k_texts, "math": math_texts}
+    mask_ratios = [0.15, 0.50, 0.85, 0.95]
+
+    print(f"\n  {'Domain':<8} {'p_mask':<8} | {'N_tok':<7} | {'Base':<8} | {'Router':<8} | {'Delta':<8}")
+    print(f"  {'-'*58}")
+
+    all_results = {}
+    for domain_name, texts in domains.items():
+        all_results[domain_name] = {}
+        for p_mask in mask_ratios:
+            correct_base, correct_router, total = 0, 0, 0
+
+            for text in texts:
+                enc = tokenizer(text, return_tensors="pt", truncation=True, max_length=256)
+                ids = enc["input_ids"].to(model.device)
+                attn_mask = enc["attention_mask"].to(model.device)
+                original = ids.clone()
+
+                mask_prob = torch.full(ids.shape, p_mask, device=ids.device)
+                mask_prob = mask_prob * attn_mask
+                mask_prob[:, 0] = 0
+                mask_indices = torch.bernoulli(mask_prob).bool()
+
+                masked_ids = ids.clone()
+                masked_ids[mask_indices] = MASK_TOKEN_ID
+
+                if not mask_indices.any():
+                    continue
+
+                b_logits = model.base_logits(masked_ids)
+                r_logits = model(masked_ids).logits
+
+                targets = original[mask_indices]
+                correct_base += (b_logits.argmax(dim=-1)[mask_indices] == targets).sum().item()
+                correct_router += (r_logits.argmax(dim=-1)[mask_indices] == targets).sum().item()
+                total += targets.numel()
+
+            base_acc = correct_base / total if total else 0
+            router_acc = correct_router / total if total else 0
+            delta = router_acc - base_acc
+
+            all_results[domain_name][str(p_mask)] = {
+                "base_acc": base_acc, "router_acc": router_acc,
+                "delta": delta, "n_tokens": total
+            }
+            print(f"  {domain_name:<8} {p_mask:<8.2f} | {total:<7} | {base_acc:<8.4f} | {router_acc:<8.4f} | {delta:<+8.4f}")
+
+    return all_results
+
+
+# ============================================================
 # EVAL 3: Logical Reasoning (generative, across temperatures)
 # ============================================================
 LOGIC_TEST_CASES = [
@@ -848,7 +932,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--eval", type=str, default=None,
-                        help="Run a single eval: 1, 2, 2b, 3, 4, 5, 6, 7, 8")
+                        help="Run a single eval: 1, 2, 2b, 2c, 3, 4, 5, 6, 7, 8")
     parser.add_argument("--weights", type=str, default="amip_router_best.pt",
                         help="Path to router checkpoint")
     cli_args = parser.parse_args()
@@ -907,6 +991,12 @@ if __name__ == "__main__":
             model, tokenizer, num_samples=50, p_mask=0.5
         )
         all_results["mask_accuracy_by_domain"] = domain_results
+
+    if run_eval in (None, "2c"):
+        ratio_domain_results = eval_mask_ratio_by_domain(
+            model, tokenizer, num_samples=50
+        )
+        all_results["mask_ratio_by_domain"] = ratio_domain_results
 
     if run_eval in (None, "3"):
         logic_results = eval_logical_reasoning(
@@ -998,6 +1088,14 @@ if __name__ == "__main__":
         print(f"     {'-'*46}")
         for domain, r in all_results["mask_accuracy_by_domain"].items():
             print(f"     {domain:<10} | {r['base_acc']:<10.4f} | {r['router_acc']:<12.4f} | {r['delta']:<+10.4f}")
+
+    if "mask_ratio_by_domain" in all_results:
+        print(f"\n  2c. Mask Accuracy — Domain × Mask Ratio")
+        print(f"     {'Domain':<8} {'p_mask':<8} | {'Base':<8} | {'Router':<8} | {'Delta':<8}")
+        print(f"     {'-'*46}")
+        for domain, ratios in all_results["mask_ratio_by_domain"].items():
+            for p_mask, r in ratios.items():
+                print(f"     {domain:<8} {p_mask:<8} | {r['base_acc']:<8.4f} | {r['router_acc']:<8.4f} | {r['delta']:<+8.4f}")
 
     if "mask_accuracy_by_ratio" in all_results and mask_ratio_results:
         print(f"\n  2. Mask Accuracy by Ratio")
