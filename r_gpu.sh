@@ -53,5 +53,6 @@ print(f'BF16 supported? {torch.cuda.is_bf16_supported()}')
 echo "========================================="
 
 # Per-step mask accuracy by domain × mask ratio
-time srun python3 /u/iyu1/nim_game_project/llada/test_router.py --eval 2c
+time srun python3 /u/iyu1/nim_game_project/llada/test_router.py --eval 2c \
+    --weights amip_router_gated_best.pt
 
